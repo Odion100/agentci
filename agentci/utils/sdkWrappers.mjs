@@ -1,6 +1,8 @@
-export function openaiWrapper(openai) {
+function openaiWrapper(openai) {
   function validateSchema(schema, exitConditions) {
+    schema = typeof schema === "function" ? schema.apply(Agent, [state]) : schema;
     //later add yum schema validations
+
     if (exitConditions.functionCall) {
       const fnExists = schema.some(
         (tool) => tool.function.name === exitConditions.functionCall
@@ -29,9 +31,27 @@ export function openaiWrapper(openai) {
   function invoke(payload) {
     return openai.chat.completions.create(payload);
   }
-  return { invoke, validateSchema };
+  function parseInput(input) {
+    let content;
+    if (typeof input === "string") {
+      content = input;
+    } else if (typeof input.image === "string") {
+      content = input.image
+        ? [
+            { type: "text", text: input.message },
+            { type: "image_url", image_url: { url: imageEncoder(input.image) } },
+          ]
+        : input.message;
+      return { role: "user", content };
+    } else if (typeof input.message === "string") {
+      content = input.message;
+    } else {
+      throw Error(`[Agentci Error]: invalid input for Agent.invoke method.`);
+    }
+    return { role: "user", content };
+  }
+  return { invoke, validateSchema, parseInput };
 }
-
-export const llmWrappers = {
+export default sdkWrappers = {
   openai: openaiWrapper,
 };

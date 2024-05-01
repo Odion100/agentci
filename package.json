@@ -16,5 +16,13 @@
   "bugs": {
     "url": "https://github.com/Odion100/agentci/issues"
   },
-  "homepage": "https://github.com/Odion100/agentci#readme"
+  "homepage": "https://github.com/Odion100/agentci#readme",
+  "devDependencies": {
+    "cz-conventional-changelog": "^3.3.0"
+  },
+  "config": {
+    "commitizen": {
+      "path": "./node_modules/cz-conventional-changelog"
+    }
+  }
 }
