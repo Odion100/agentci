@@ -55,8 +55,7 @@ export default function agentRequestHandler(Agent, internalContext, input, state
   function shouldContinue(state) {
     const { exitConditions } = internalContext;
     const { iterations, errors } = state;
-    const fn = state.messages[state.messages.length - 1].name;
-    console.log("fn--->  ", fn);
+    const fn = state.messages[state.messages.length - 1].tool_calls[0].function.name;
     return !(
       exitConditions.functionCall === fn ||
       (exitConditions.iterations && iterations >= exitConditions.iterations) ||

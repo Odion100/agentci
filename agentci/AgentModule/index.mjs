@@ -67,7 +67,7 @@ export default function createAgentModule(systemContext) {
         }, {});
         function getSchemas() {
           const getSchema = ({ schema }) =>
-            typeof schema === "function" ? schema(state) : schema;
+            typeof schema === "function" ? schema(state) : schema || [];
           const combinedSchema = [
             ...getSchema(internalContext),
             ...getSchema(systemContext.config),
