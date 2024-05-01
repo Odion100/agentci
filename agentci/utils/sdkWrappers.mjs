@@ -1,6 +1,8 @@
+import imageEncoder from "./imageEncoder.mjs";
+
 function openaiWrapper(openai) {
-  function validateSchema(schema, exitConditions) {
-    schema = typeof schema === "function" ? schema.apply(Agent, [state]) : schema;
+  function parseSchema(schema, exitConditions) {
+    schema = typeof schema === "function" ? schema(state) : schema;
     //later add yum schema validations
 
     if (exitConditions.functionCall) {
@@ -26,6 +28,7 @@ function openaiWrapper(openai) {
         });
       }
     }
+    return schema;
   }
 
   function invoke(payload) {
@@ -50,8 +53,8 @@ function openaiWrapper(openai) {
     }
     return { role: "user", content };
   }
-  return { invoke, validateSchema, parseInput };
+  return { invoke, parseSchema, parseInput };
 }
-export default sdkWrappers = {
+export default {
   openai: openaiWrapper,
 };

@@ -1,6 +1,5 @@
-import imageEncoder from "./utils/imageEncoder.mjs";
 export default function agentRequestHandler(Agent, internalContext, input, state) {
-  async function runMiddleware(mwList, data) {
+  async function runMiddleware(mwList = [], data) {
     const { agents } = internalContext;
     for (const middleware of mwList) {
       await new Promise((resolve) =>
@@ -14,13 +13,14 @@ export default function agentRequestHandler(Agent, internalContext, input, state
 
     for (const toolCall of toolCalls) {
       const fn = toolCall.function.name;
-
+      console.log("Agent k123", Agent);
       if (Agent[fn]) {
         const args = JSON.parse(toolCall.function.arguments);
-        const fnMiddleware = [...middleware["$all"], ...middleware[fn]];
+        const fnMiddleware = [...(middleware["$all"] || []), ...(middleware[fn] || [])];
         await runMiddleware(fnMiddleware, { fn, arguments: args, state });
         try {
-          const functionResponse = await Agent[fn].apply({ ...Agent, agents }, args);
+          console.log("args--", args);
+          const functionResponse = await Agent[fn].apply({ ...Agent, agents }, [args]);
           console.log("functionResponse:", functionResponse);
 
           state.messages.push({
@@ -30,6 +30,7 @@ export default function agentRequestHandler(Agent, internalContext, input, state
             content: functionResponse,
           });
         } catch (error) {
+          console.log("error1", error);
           state.errors.push(error);
           state.messages.push({
             tool_call_id: toolCall.id,
@@ -51,9 +52,11 @@ export default function agentRequestHandler(Agent, internalContext, input, state
     }
   }
 
-  function shouldContinue(fn, state) {
+  function shouldContinue(state) {
     const { exitConditions } = internalContext;
     const { iterations, errors } = state;
+    const fn = state.messages[state.messages.length - 1].name;
+    console.log("fn--->  ", fn);
     return !(
       exitConditions.functionCall === fn ||
       (exitConditions.iterations && iterations >= exitConditions.iterations) ||
@@ -62,7 +65,7 @@ export default function agentRequestHandler(Agent, internalContext, input, state
     );
   }
   function getPrompt() {
-    typeof internalContext.prompt === "function"
+    return typeof internalContext.prompt === "function"
       ? internalContext.prompt(state)
       : internalContext.prompt;
   }
@@ -79,22 +82,24 @@ export default function agentRequestHandler(Agent, internalContext, input, state
     do {
       state.iterations++;
       systemMessage.content = getPrompt();
-      const response = await llm.invoke({
+      const options = {
         model,
         messages: state.messages,
         tools: schema(),
         tool_choice: "auto",
         temperature,
         max_tokens,
-      });
+      };
+      console.log("options-->", options);
+      const response = await llm.invoke(options);
       const responseMessage = response.choices[0].message;
-      messages.push(responseMessage);
+      state.messages.push(responseMessage);
       console.log("responseMessage--->", responseMessage, responseMessage.tool_calls);
       const toolCalls = responseMessage.tool_calls;
       if (toolCalls) {
         await callFunctions(toolCalls);
       }
-    } while (shouldContinue(fn, state));
+    } while (shouldContinue(state));
     return state.messages[state.messages.length - 1].content;
   }
 

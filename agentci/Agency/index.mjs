@@ -1,14 +1,30 @@
 import createAgentModule from "../AgentModule/index.mjs";
 import ConfigModule from "../ConfigModule/index.mjs";
 function createAgentci() {
-  const systemContext = { Agents: [], config: {} };
+  const systemContext = {
+    Agents: [],
+    config: {
+      sdk: undefined,
+      model: "",
+      prompt: "",
+      provider: "",
+      temperature: undefined,
+      max_tokens: undefined,
+      schema: [],
+      exitConditions: {},
+      middleware: {},
+      agents: [],
+    },
+  };
   const AgentModule = createAgentModule(systemContext);
 
   const Agentci = {};
   let rootModule = null;
 
   function createModule(__constructor) {
-    typeof __constructor === "function" ? AgentModule(__constructor) : __constructor;
+    return typeof __constructor === "function"
+      ? AgentModule(__constructor)
+      : __constructor;
   }
   Agentci.agent = (name, __constructor) => {
     const agentModule = createModule(__constructor);
@@ -23,7 +39,7 @@ function createAgentci() {
       name: "$root",
       module: rootModule,
     });
-
+    // console.log("rootModule-->", rootModule);
     return { ...rootModule, agent: Agentci.agent, config: Agentci.config };
   };
 

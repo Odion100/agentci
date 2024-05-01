@@ -48,11 +48,6 @@ export default function createAgentModule(systemContext) {
       }
       return middleware;
     }
-    function getSchemas() {
-      const getSchema = ({ schema }) =>
-        typeof schema === "function" ? schema(state) : schema;
-      return [...getSchema(internalContext), ...getSchema(systemContext.config)];
-    }
 
     let context = null;
     function invoke(input, state = {}) {
@@ -64,11 +59,23 @@ export default function createAgentModule(systemContext) {
           internalContext.exitConditions
         );
         const middleware = getMiddleware();
+        console.log("systemContext", systemContext);
         const agentList = [...conf.agents, ...internalContext.agents];
         const agents = systemContext.Agents.reduce(({ name, module }, results) => {
           if (agentList.includes(name)) results[name] = module;
           return results;
         }, {});
+        function getSchemas() {
+          const getSchema = ({ schema }) =>
+            typeof schema === "function" ? schema(state) : schema;
+          const combinedSchema = [
+            ...getSchema(internalContext),
+            ...getSchema(systemContext.config),
+          ];
+          context.llm.parseSchema(combinedSchema, context.exitConditions);
+          return combinedSchema;
+        }
+
         context = {
           sdk: conf.sdk || internalContext.sdk,
           model: conf.model || internalContext.model,
@@ -81,7 +88,7 @@ export default function createAgentModule(systemContext) {
           middleware,
           agents,
         };
-        const { sdk, model, prompt, provider } = context;
+        const { sdk, model, prompt, provider, schema } = context;
         for (const prop in { sdk, model, prompt, provider }) {
           if (!context[prop])
             throw Error(`[Agentci Error]: required agent context ${prop}`);
@@ -90,11 +97,11 @@ export default function createAgentModule(systemContext) {
           throw Error(`[Agentci Error]: ${provider} is not a supported provider.`);
 
         context.llm = sdkWrappers[provider](sdk);
-        context.llm.validateSchema(schema, context.exitConditions);
       }
 
       const agent = { ...systemContext.config.Agent, ...Agent };
-      if (!state.message) state.message = [];
+      if (!state.message) state.messages = [];
+      console.log("state", state);
       return agentRequestHandler(agent, context, input, state);
     }
     return { invoke };
