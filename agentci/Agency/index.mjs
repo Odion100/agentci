@@ -12,7 +12,10 @@ function createAgentci() {
       max_tokens: undefined,
       schema: [],
       exitConditions: {},
-      middleware: {},
+      middleware: {
+        before: {},
+        after: {},
+      },
       agents: [],
     },
   };

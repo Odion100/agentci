@@ -1,46 +1,42 @@
+import sdkWrappers from "../../utils/sdkWrappers.mjs";
 export default function agentRequestHandler(Agent, internalContext, input, state) {
   async function runMiddleware(mwList = [], data) {
-    const { agents } = internalContext;
     for (const middleware of mwList) {
-      await new Promise((resolve) =>
-        middleware.apply({ ...Agent, agents }, [data, resolve])
-      );
+      await new Promise((resolve) => middleware(data, resolve));
     }
   }
 
-  async function callFunctions(toolCalls = []) {
-    const { exitConditions, middleware, agents } = internalContext;
+  async function callFunctions(toolCall) {
+    const {
+      exitConditions,
+      middleware: { before, after },
+      agents,
+    } = internalContext;
 
-    for (const toolCall of toolCalls) {
-      const fn = toolCall.function.name;
-      console.log("Agent k123", Agent);
-      if (Agent[fn]) {
-        const args = JSON.parse(toolCall.function.arguments);
-        const fnMiddleware = [...(middleware["$all"] || []), ...(middleware[fn] || [])];
-        await runMiddleware(fnMiddleware, { fn, arguments: args, state });
-        try {
-          console.log("args--", args);
-          const functionResponse = await Agent[fn].apply({ ...Agent, agents }, [args]);
-          console.log("functionResponse:", functionResponse);
+    const fn = toolCall.function.name;
+    if (Agent[fn]) {
+      const args = JSON.parse(toolCall.function.arguments);
+      const beforeware = [...(before["$all"] || []), ...(before[fn] || [])];
+      const afterware = [...(after["$all"] || []), ...(after[fn] || [])];
+      const middlewareData = { fn, state, input, agents, arguments: args };
+      await runMiddleware(beforeware, middlewareData);
+      try {
+        const functionResponse = await Agent[fn].apply(Agent, [
+          args,
+          { agents, state, fn, input },
+        ]);
+        console.log("functionResponse:", functionResponse);
 
-          state.messages.push({
-            tool_call_id: toolCall.id,
-            role: "tool",
-            name: fn,
-            content: functionResponse,
-          });
-        } catch (error) {
-          console.log("error1", error);
-          state.errors.push(error);
-          state.messages.push({
-            tool_call_id: toolCall.id,
-            role: "tool",
-            name: fn,
-            content: error,
-          });
-        }
-      } else if (exitConditions.functionCall != fn) {
-        const error = { message: "invalid function call", status: 400 };
+        state.messages.push({
+          tool_call_id: toolCall.id,
+          role: "tool",
+          name: fn,
+          content: functionResponse,
+        });
+        middlewareData.functionResponse = functionResponse;
+        await runMiddleware(afterware, middlewareData);
+      } catch (error) {
+        console.log("error1", error);
         state.errors.push(error);
         state.messages.push({
           tool_call_id: toolCall.id,
@@ -49,56 +45,95 @@ export default function agentRequestHandler(Agent, internalContext, input, state
           content: error,
         });
       }
+    } else if (!exitConditions.functionCall.includes(fn)) {
+      const error = { message: "invalid function call", status: 400 };
+      state.errors.push(error);
+      state.messages.push({
+        tool_call_id: toolCall.id,
+        role: "tool",
+        name: fn,
+        content: error,
+      });
     }
   }
 
-  function shouldContinue(state) {
+  function shouldContinue(state, fnCall) {
     const { exitConditions } = internalContext;
     const { iterations, errors } = state;
-    const fn = state.messages[state.messages.length - 1].tool_calls[0].function.name;
+    const fn = fnCall ? fnCall.function.name : "";
     return !(
-      exitConditions.functionCall === fn ||
+      (exitConditions.functionCall && exitConditions.functionCall.includes(fn)) ||
       (exitConditions.iterations && iterations >= exitConditions.iterations) ||
       (exitConditions.errors && errors.length >= exitConditions.errors) ||
       (typeof exitConditions.state === "function" && exitConditions.state(state))
     );
   }
-  function getPrompt() {
-    return typeof internalContext.prompt === "function"
-      ? internalContext.prompt(state)
-      : internalContext.prompt;
+  function getSchema() {
+    const dynamicSchema = (schema) =>
+      typeof schema === "function" ? schema(state) : schema || [];
+    return sdkWrappers[getDynamicValue("provider")]().validateSchema(
+      [
+        ...dynamicSchema(internalContext.schemas.default),
+        ...dynamicSchema(internalContext.schemas.internal),
+      ],
+      internalContext.exitConditions
+    );
   }
-
+  function getDynamicValue(option) {
+    if (option === "llm") {
+      const provider = getDynamicValue("provider");
+      if (!sdkWrappers[provider])
+        throw Error(`[Agentci Error]: ${provider} is not a supported provider.`);
+      return sdkWrappers[provider](getDynamicValue("sdk"));
+    }
+    if (option === "schema") return getSchema();
+    return typeof internalContext[option] === "function"
+      ? internalContext[option](state)
+      : internalContext[option];
+  }
+  let llm;
   async function runRequests() {
-    const { llm, model, temperature, max_tokens, middleware, schema } = internalContext;
+    const { middleware, agents, exitConditions } = internalContext;
+    await runMiddleware(middleware.before.$invoke, {
+      fn: "$invoke",
+      state,
+      input,
+      agents,
+    });
+    llm = getDynamicValue("llm");
     const systemMessage = { role: "system", content: "" };
     const userMessage = llm.parseInput(input);
     state.messages.push(systemMessage, userMessage);
     state.iterations = 0;
     state.errors = [];
-    await runMiddleware(middleware.$invoke, { fn: "$invoke", state });
-
+    let currentProvider = "";
+    let fnCall;
     do {
       state.iterations++;
-      systemMessage.content = getPrompt();
+      systemMessage.content = getDynamicValue("prompt");
       const options = {
-        model,
+        model: getDynamicValue("model"),
+        tools: getDynamicValue("schema"),
+        temperature: getDynamicValue("temperature"),
+        max_tokens: getDynamicValue("max_tokens"),
         messages: state.messages,
-        tools: schema(),
         tool_choice: "auto",
-        temperature,
-        max_tokens,
       };
-      console.log("options-->", options);
-      const response = await llm.invoke(options);
-      const responseMessage = response.choices[0].message;
-      state.messages.push(responseMessage);
-      console.log("responseMessage--->", responseMessage, responseMessage.tool_calls);
-      const toolCalls = responseMessage.tool_calls;
-      if (toolCalls) {
-        await callFunctions(toolCalls);
+      const provider = getDynamicValue("provider");
+      if (provider !== currentProvider) {
+        currentProvider = provider;
+        llm = getDynamicValue("llm");
       }
-    } while (shouldContinue(state));
+      console.log("message", options.messages[options.messages.length - 1]);
+      const response = await llm.invoke(options);
+
+      state.messages.push(response.message);
+
+      if (response.functionCall) {
+        fnCall = response.functionCall;
+        await callFunctions(response.functionCall);
+      }
+    } while (shouldContinue(state, fnCall));
     return state.messages[state.messages.length - 1].content;
   }
 

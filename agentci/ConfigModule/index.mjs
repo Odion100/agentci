@@ -9,8 +9,11 @@ export default function ConfigModule(constructor) {
 
   const internalContext = {
     agents: [],
-    exitConditions: { iterations: 0, errors: 0, functionCall: "finished" },
-    middleware: {},
+    exitConditions: { iterations: 0, errors: 0, functionCall: ["finished"] },
+    middleware: {
+      before: {},
+      after: {},
+    },
   };
 
   const Agent = new EventEmitter();
@@ -24,12 +27,19 @@ export default function ConfigModule(constructor) {
   };
 
   Agent.before = (...args) => {
-    const { middleware } = internalContext;
     if (typeof args[0] === "string") {
       const fn = args.shift();
-      addMiddleware(`${fn}`, args, middleware);
+      addMiddleware(`${fn}`, args, internalContext.middleware.before);
     } else {
-      addMiddleware("$invoke", args, middleware);
+      addMiddleware("$invoke", args, internalContext.middleware.before);
+    }
+  };
+  Agent.after = (...args) => {
+    if (typeof args[0] === "string") {
+      const fn = args.shift();
+      addMiddleware(`${fn}`, args, internalContext.middleware.after);
+    } else {
+      addMiddleware("$invoke", args, internalContext.middleware.after);
     }
   };
 

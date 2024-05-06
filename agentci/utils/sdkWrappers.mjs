@@ -1,51 +1,48 @@
 import imageEncoder from "./imageEncoder.mjs";
 
 function openaiWrapper(openai) {
-  function parseSchema(schema, exitConditions) {
+  function validateSchema(schema, exitConditions) {
     schema = typeof schema === "function" ? schema(state) : schema;
     //later add yum schema validations
 
-    if (exitConditions.functionCall) {
-      const fnExists = schema.some(
-        (tool) => tool.function.name === exitConditions.functionCall
-      );
-      if (!fnExists) {
-        schema.push({
-          type: "function",
-          function: {
-            name: exitConditions.functionCall,
-            description: "Indicate that you are finished with the task",
-            parameters: {
-              type: "object",
-              properties: {
-                response: {
-                  type: "string",
-                  description: "a response to return to the user if necessary",
-                },
+    const fnExists = schema.some((tool) =>
+      exitConditions.functionCall.includes(tool.function.name)
+    );
+    if (!fnExists) {
+      schema.push({
+        type: "function",
+        function: {
+          name: exitConditions.functionCall[0],
+          description: "Indicate that you are finished with the task",
+          parameters: {
+            type: "object",
+            properties: {
+              response: {
+                type: "string",
+                description: "a response to return to the user if necessary",
               },
             },
           },
-        });
-      }
+        },
+      });
     }
     return schema;
   }
 
-  function invoke(payload) {
-    return openai.chat.completions.create(payload);
+  async function invoke(payload) {
+    const response = await openai.chat.completions.create(payload);
+    const message = response.choices[0].message;
+    const functionCall = message.tool_calls ? message.tool_calls[0] : null;
+    console.log("response->", message);
+    return { message: message, functionCall };
   }
   function parseInput(input) {
     let content;
-    if (typeof input === "string") {
-      content = input;
-    } else if (typeof input.image === "string") {
-      content = input.image
-        ? [
-            { type: "text", text: input.message },
-            { type: "image_url", image_url: { url: imageEncoder(input.image) } },
-          ]
-        : input.message;
-      return { role: "user", content };
+    if (typeof input.image === "string") {
+      content = [
+        { type: "text", text: input.message },
+        { type: "image_url", image_url: { url: imageEncoder(input.image) } },
+      ];
     } else if (typeof input.message === "string") {
       content = input.message;
     } else {
@@ -53,7 +50,7 @@ function openaiWrapper(openai) {
     }
     return { role: "user", content };
   }
-  return { invoke, parseSchema, parseInput };
+  return { invoke, validateSchema, parseInput };
 }
 export default {
   openai: openaiWrapper,

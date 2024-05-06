@@ -12,13 +12,26 @@ export default function createAgentModule(systemContext) {
 
     const internalContext = {
       agents: [],
-      exitConditions: { iterations: 0, errors: 0, functionCall: "finished" },
-      middleware: {},
+      exitConditions: { iterations: 0, errors: 0, functionCall: ["finished"] },
+      middleware: {
+        before: {},
+        after: {},
+      },
     };
 
     const Agent = new EventEmitter();
-
+    const reservedKeys = ["use", "before", "after"];
     Agent.use = (options) => {
+      if (options.exitConditions) {
+        if (typeof options.exitConditions.functionCall === "string") {
+          options.exitConditions.functionCall = [options.exitConditions.functionCall];
+        } else options.exitConditions.functionCall = ["finished"];
+        if (options.exitConditions.functionCall.includes("$all")) {
+          const i = options.exitConditions.functionCall.indexOf("$all");
+          const methods = Object.keys(Agent).filter((key) => !reservedKeys.includes(key));
+          options.exitConditions.functionCall.splice(i, 1, ...methods);
+        }
+      }
       options.exitConditions = Object.assign(
         internalContext.exitConditions,
         options.exitConditions
@@ -29,24 +42,40 @@ export default function createAgentModule(systemContext) {
     Agent.before = (...args) => {
       if (typeof args[0] === "string") {
         const fn = args.shift();
-        addMiddleware(`${fn}`, args, internalContext.middleware);
+        addMiddleware(`${fn}`, args, internalContext.middleware.before);
       } else {
-        addMiddleware("$invoke", args, internalContext.middleware);
+        addMiddleware("$invoke", args, internalContext.middleware.before);
+      }
+    };
+    Agent.after = (...args) => {
+      if (typeof args[0] === "string") {
+        const fn = args.shift();
+        addMiddleware(`${fn}`, args, internalContext.middleware.after);
+      } else {
+        addMiddleware("$invoke", args, internalContext.middleware.after);
       }
     };
 
     constructor.apply(Agent, []);
 
     function getMiddleware() {
-      const middleware = Object.assign({}, systemContext.config.middleware || {});
-      for (prop in internalContext.middleware) {
-        if (middleware[prop]) {
-          middleware[prop].push(...internalContext.middleware[prop]);
+      const before = Object.assign({}, systemContext.config.middleware.before);
+      for (prop in internalContext.middleware.before) {
+        if (before[prop]) {
+          before[prop].push(...internalContext.middleware.before[prop]);
         } else {
-          middleware[prop] = internalContext.middleware[prop];
+          before[prop] = internalContext.middleware.before[prop];
         }
       }
-      return middleware;
+      const after = Object.assign({}, systemContext.config.middleware.after);
+      for (prop in internalContext.middleware.after) {
+        if (after[prop]) {
+          after[prop].push(...internalContext.middleware.after[prop]);
+        } else {
+          after[prop] = internalContext.middleware.after[prop];
+        }
+      }
+      return { before, after };
     }
 
     let context = null;
@@ -59,22 +88,11 @@ export default function createAgentModule(systemContext) {
           internalContext.exitConditions
         );
         const middleware = getMiddleware();
-        console.log("systemContext", systemContext);
         const agentList = [...conf.agents, ...internalContext.agents];
         const agents = systemContext.Agents.reduce(({ name, module }, results) => {
           if (agentList.includes(name)) results[name] = module;
           return results;
         }, {});
-        function getSchemas() {
-          const getSchema = ({ schema }) =>
-            typeof schema === "function" ? schema(state) : schema || [];
-          const combinedSchema = [
-            ...getSchema(internalContext),
-            ...getSchema(systemContext.config),
-          ];
-          context.llm.parseSchema(combinedSchema, context.exitConditions);
-          return combinedSchema;
-        }
 
         context = {
           sdk: conf.sdk || internalContext.sdk,
@@ -83,12 +101,12 @@ export default function createAgentModule(systemContext) {
           provider: conf.provider || internalContext.provider,
           temperature: conf.temperature || internalContext.temperature,
           max_tokens: conf.max_tokens || internalContext.max_tokens,
-          schema: getSchemas,
+          schemas: { default: conf.schema, internal: internalContext.schema },
           exitConditions,
           middleware,
           agents,
         };
-        const { sdk, model, prompt, provider, schema } = context;
+        const { sdk, model, prompt, provider } = context;
         for (const prop in { sdk, model, prompt, provider }) {
           if (!context[prop])
             throw Error(`[Agentci Error]: required agent context ${prop}`);
@@ -101,8 +119,8 @@ export default function createAgentModule(systemContext) {
 
       const agent = { ...systemContext.config.Agent, ...Agent };
       if (!state.message) state.messages = [];
-      console.log("state", state);
-      return agentRequestHandler(agent, context, input, state);
+      const userInput = typeof input === "string" ? { message: input } : input;
+      return agentRequestHandler(agent, context, userInput, state);
     }
     return { invoke };
   };
