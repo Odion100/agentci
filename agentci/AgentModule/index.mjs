@@ -3,7 +3,7 @@ import sdkWrappers from "../utils/sdkWrappers.mjs";
 import agentRequestHandler from "./utils/agentRequestHandler.mjs";
 
 export default function createAgentModule(systemContext) {
-  return function AgentModule(constructor) {
+  return function AgentModule(constructor, name) {
     if (
       typeof constructor != "function" ||
       constructor.constructor.name === "AsyncFunction"
@@ -18,14 +18,23 @@ export default function createAgentModule(systemContext) {
         after: {},
       },
     };
-
-    const Agent = new EventEmitter();
+    let state = {};
+    const emitter = new EventEmitter();
+    const Agent = {};
+    Agent.on = emitter.on;
+    Agent.once = emitter.once;
+    Agent.emit = function (name, ...args) {
+      args.push(state);
+      emitter.emit(name, ...args);
+    };
     const reservedKeys = ["use", "before", "after"];
     Agent.use = (options) => {
       if (options.exitConditions) {
         if (typeof options.exitConditions.functionCall === "string") {
           options.exitConditions.functionCall = [options.exitConditions.functionCall];
-        } else options.exitConditions.functionCall = ["finished"];
+        } else if (!Array.isArray(options.exitConditions.functionCall)) {
+          options.exitConditions.functionCall = ["finished"];
+        }
         if (options.exitConditions.functionCall.includes("$all")) {
           const i = options.exitConditions.functionCall.indexOf("$all");
           const methods = Object.keys(Agent).filter((key) => !reservedKeys.includes(key));
@@ -60,7 +69,7 @@ export default function createAgentModule(systemContext) {
 
     function getMiddleware() {
       const before = Object.assign({}, systemContext.config.middleware.before);
-      for (prop in internalContext.middleware.before) {
+      for (const prop in internalContext.middleware.before) {
         if (before[prop]) {
           before[prop].push(...internalContext.middleware.before[prop]);
         } else {
@@ -68,7 +77,7 @@ export default function createAgentModule(systemContext) {
         }
       }
       const after = Object.assign({}, systemContext.config.middleware.after);
-      for (prop in internalContext.middleware.after) {
+      for (const prop in internalContext.middleware.after) {
         if (after[prop]) {
           after[prop].push(...internalContext.middleware.after[prop]);
         } else {
@@ -77,9 +86,22 @@ export default function createAgentModule(systemContext) {
       }
       return { before, after };
     }
-
+    function mergeStates(newState) {
+      //rules: 1. the ref to the newState object that is passed in should not be lost
+      //2. the values applied to new state should not be overwritten
+      //3. the internal state takes precedence over the config state
+      const initialInternalState = internalContext.state || {};
+      const initialConfigState = systemContext.config.state || {};
+      for (const state of [initialInternalState, initialConfigState]) {
+        for (const prop in state) {
+          if (!newState[prop]) newState[prop] = state[prop];
+        }
+      }
+      return newState;
+    }
     let context = null;
-    function invoke(input, state = {}) {
+    function invoke(input, inputState = {}) {
+      state = mergeStates(inputState);
       if (!context) {
         const { config: conf } = systemContext;
         const exitConditions = Object.assign(
@@ -89,12 +111,14 @@ export default function createAgentModule(systemContext) {
         );
         const middleware = getMiddleware();
         const agentList = [...conf.agents, ...internalContext.agents];
-        const agents = systemContext.Agents.reduce(({ name, module }, results) => {
+        const agents = systemContext.Agents.reduce((results, { name, module }) => {
           if (agentList.includes(name)) results[name] = module;
           return results;
         }, {});
-
+        // console.log("agents", agents);
+        // throw agentList;
         context = {
+          name,
           sdk: conf.sdk || internalContext.sdk,
           model: conf.model || internalContext.model,
           prompt: conf.prompt || internalContext.prompt,
@@ -118,7 +142,7 @@ export default function createAgentModule(systemContext) {
       }
 
       const agent = { ...systemContext.config.Agent, ...Agent };
-      if (!state.message) state.messages = [];
+      if (!state.messages) state.messages = [];
       const userInput = typeof input === "string" ? { message: input } : input;
       return agentRequestHandler(agent, context, userInput, state);
     }

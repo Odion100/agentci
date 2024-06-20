@@ -24,20 +24,20 @@ function createAgentci() {
   const Agentci = {};
   let rootModule = null;
 
-  function createModule(__constructor) {
+  function createModule(__constructor, name) {
     return typeof __constructor === "function"
-      ? AgentModule(__constructor)
+      ? AgentModule(__constructor, name)
       : __constructor;
   }
   Agentci.agent = (name, __constructor) => {
-    const agentModule = createModule(__constructor);
+    const agentModule = createModule(__constructor, name);
     if (!systemContext.Agents.length) rootModule = agentModule;
     systemContext.Agents.push({ name, module: agentModule });
     return { ...rootModule, agent: Agentci.agent, config: Agentci.config };
   };
 
   Agentci.rootAgent = (__constructor) => {
-    rootModule = createModule(__constructor);
+    rootModule = createModule(__constructor, "$root");
     systemContext.Agents.push({
       name: "$root",
       module: rootModule,

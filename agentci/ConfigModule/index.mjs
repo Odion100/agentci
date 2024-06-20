@@ -15,10 +15,29 @@ export default function ConfigModule(constructor) {
       after: {},
     },
   };
-
-  const Agent = new EventEmitter();
-
+  let state = {};
+  const emitter = new EventEmitter();
+  const Agent = {};
+  Agent.on = emitter.on;
+  Agent.once = emitter.once;
+  Agent.emit = function (name, ...args) {
+    args.push(state);
+    emitter.emit(name, ...args);
+  };
+  const reservedKeys = ["use", "before", "after"];
   Agent.use = (options) => {
+    if (options.exitConditions) {
+      if (typeof options.exitConditions.functionCall === "string") {
+        options.exitConditions.functionCall = [options.exitConditions.functionCall];
+      } else if (!Array.isArray(options.exitConditions.functionCall)) {
+        options.exitConditions.functionCall = ["finished"];
+      }
+      if (options.exitConditions.functionCall.includes("$all")) {
+        const i = options.exitConditions.functionCall.indexOf("$all");
+        const methods = Object.keys(Agent).filter((key) => !reservedKeys.includes(key));
+        options.exitConditions.functionCall.splice(i, 1, ...methods);
+      }
+    }
     options.exitConditions = Object.assign(
       internalContext.exitConditions,
       options.exitConditions

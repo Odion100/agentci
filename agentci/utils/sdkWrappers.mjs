@@ -32,10 +32,10 @@ function openaiWrapper(openai) {
   async function invoke(payload) {
     const response = await openai.chat.completions.create(payload);
     const message = response.choices[0].message;
-    const functionCall = message.tool_calls ? message.tool_calls[0] : null;
-    console.log("response->", message);
-    return { message: message, functionCall };
+    const functionCalls = message.tool_calls ? message.tool_calls : null;
+    return { message: message, functionCalls };
   }
+
   function parseInput(input) {
     let content;
     if (typeof input.image === "string") {
@@ -43,6 +43,14 @@ function openaiWrapper(openai) {
         { type: "text", text: input.message },
         { type: "image_url", image_url: { url: imageEncoder(input.image) } },
       ];
+    } else if (Array.isArray(input.images)) {
+      content = [{ type: "text", text: input.message }];
+      for (const image of input.images) {
+        content.push({
+          type: "image_url",
+          image_url: { url: imageEncoder(image) },
+        });
+      }
     } else if (typeof input.message === "string") {
       content = input.message;
     } else {
