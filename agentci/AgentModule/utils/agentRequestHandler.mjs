@@ -25,23 +25,25 @@ export default function agentRequestHandler(Agent, context, input, state) {
   async function callFunctions(toolCalls) {
     const { exitConditions, middleware, agents } = context;
     const fnResponseMessages = [];
+    let abort = false;
     for (const toolCall of toolCalls) {
       const fn = toolCall.function.name;
-      if (Agent[fn]) {
+      if (Agent[fn] && !abort) {
         console.log(`${context.name} calling ${fn}...`);
 
         const args = parseArgs(toolCall.function.arguments);
         console.log("args", args);
         const middlewareData = { fn, state, input, agents, args };
         await runMiddleware(middleware.before[fn], middlewareData);
-        console.log("should");
-        if (!shouldContinue(state, [])) {
+
+        if (!shouldContinue(state, ["$$$"])) {
           fnResponseMessages.push({
             tool_call_id: toolCall.id,
             role: "tool",
             name: fn,
             content: "function all aborted",
           });
+          abort = true;
           break;
         }
         try {
@@ -57,6 +59,16 @@ export default function agentRequestHandler(Agent, context, input, state) {
             name: fn,
             content: getStringValue(functionResponse),
           });
+          if (!shouldContinue(state, [fn])) {
+            abort = true;
+            break;
+          }
+          await runMiddleware(middleware.after[fn], middlewareData);
+
+          if (!shouldContinue(state, [fn])) {
+            abort = true;
+          }
+          // if (exitConditions.functionCall.includes(fn)) abort = true;
         } catch (error) {
           console.log(`${context.name}.${fn} error:`, error, state, toolCall);
           state.errors.push(error);
@@ -67,31 +79,38 @@ export default function agentRequestHandler(Agent, context, input, state) {
             content: error.message ? `error: ${error.message}` : "unexpected error",
           });
         }
-      } else if (!exitConditions.functionCall.includes(fn)) {
-        const error = { message: "invalid function call", status: 400 };
+      } else if (!exitConditions.functionCall.includes(fn) || abort) {
+        const error = { message: "function call aborted", status: 400 };
         state.errors.push(error);
         fnResponseMessages.push({
           tool_call_id: toolCall.id,
           role: "tool",
           name: fn,
-          content: "invalid function call error",
+          content: "function call aborted",
         });
-      }
-    }
-    if (shouldContinue(state, ["$$$"])) {
-      for (const toolCall of toolCalls) {
-        const fn = toolCall.function.name;
-        await runMiddleware(middleware.after[fn], { fn, state, input, agents });
+        console.log("skipping this one", toolCall);
       }
     }
     return fnResponseMessages;
   }
-
+  let consecutiveNonFunctionCalls = 0;
   function shouldContinue(state, fnCalls) {
     const { exitConditions } = context;
     const { iterations, errors } = state;
+    if (!fnCalls.length) {
+      consecutiveNonFunctionCalls++;
+    } else if (!fnCalls[0].startsWith("$")) {
+      consecutiveNonFunctionCalls = 0;
+    }
+    // console.log(
+    //   "consecutiveNonFunctionCalls fnCalls, shortCircuit",
+    //   consecutiveNonFunctionCalls,
+    //   fnCalls,
+    //   exitConditions.shortCircuit
+    // );
     return !(
-      (exitConditions.shortCircuit && !fnCalls.length && iterations) ||
+      (exitConditions.shortCircuit &&
+        !consecutiveNonFunctionCalls >= exitConditions.shortCircuit) ||
       (exitConditions.functionCall &&
         exitConditions.functionCall.some((fn) => fnCalls.includes(fn))) ||
       (exitConditions.iterations && iterations >= exitConditions.iterations) ||
@@ -101,7 +120,7 @@ export default function agentRequestHandler(Agent, context, input, state) {
   }
   function getSchema() {
     const dynamicSchema = (schema) =>
-      typeof schema === "function" ? schema(state) : schema || [];
+      typeof schema === "function" ? schema({ state, input }) : schema || [];
     return sdkWrappers[getDynamicValue("provider")]().validateSchema(
       [
         ...dynamicSchema(context.schemas.default),
@@ -135,7 +154,7 @@ export default function agentRequestHandler(Agent, context, input, state) {
     state.iterations = 0;
     state.errors = [];
     let currentProvider = "";
-    let fnCalls = [];
+    let fnCalls = ["$invoke"];
     await runMiddleware(middleware.before.$invoke, {
       fn: "$invoke",
       state,
@@ -158,19 +177,21 @@ export default function agentRequestHandler(Agent, context, input, state) {
         currentProvider = provider;
         llm = getDynamicValue("llm");
       }
-      if (true) {
-        const m = options.messages[options.messages.length - 1];
-        console.log(`${context.name} ${m.role}: ${m.content}`);
-        console.log(`${context.name} state:`, state.messages);
-      }
+
       try {
         await runMiddleware(middleware.before.$all, {
           fn: "$all",
+          functionCalls: fnCalls,
           state,
           input,
           agents,
         });
         const response = await llm.invoke(options);
+        if (true) {
+          const m = options.messages[options.messages.length - 1];
+          console.log(`${context.name} ${m.role}: ${m.content}`);
+          // console.log(`${context.name} state:`, state.messages);
+        }
         context.output = response.message.content;
         if (response.functionCalls) {
           fnCalls = response.functionCalls.map(({ function: fn }) => fn.name);
@@ -188,6 +209,7 @@ export default function agentRequestHandler(Agent, context, input, state) {
       } finally {
         await runMiddleware(middleware.after.$all, {
           fn: "$all",
+          functionCalls: fnCalls,
           state,
           input,
           agents,
