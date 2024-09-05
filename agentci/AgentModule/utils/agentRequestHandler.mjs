@@ -5,16 +5,21 @@ export default function agentRequestHandler(Agent, context, input, state) {
   async function runMiddleware(mwList = [], data) {
     for (const middleware of mwList) {
       try {
+        console.log("running middleware:", middleware.name, data.fn);
         const mwOptions = await new Promise((resolve) => middleware(data, resolve));
+        console.log("ending middleware:", middleware.name);
         if (typeof mwOptions === "object" && mwOptions.hasOwnProperty("return")) {
           context.output = mwOptions.return || mwOptions.output;
         }
-        if (!shouldContinue(state, [data.fn])) return;
+        console.log("shouldContinue(state)", shouldContinue(state));
+        if (!shouldContinue(state)) break;
       } catch (error) {
         console.log(`${context.name}[middleware] error:`, error);
       }
     }
+    console.log("middleware list", mwList);
   }
+
   function parseArgs(args) {
     try {
       return JSON.parse(args);
@@ -24,93 +29,83 @@ export default function agentRequestHandler(Agent, context, input, state) {
   }
   async function callFunctions(toolCalls) {
     const { exitConditions, middleware, agents } = context;
-    const fnResponseMessages = [];
+    const functionResponses = toolCalls.map((toolCall) => ({
+      tool_call_id: toolCall.id,
+      role: "tool",
+      name: toolCall.function.name,
+      content: "",
+    }));
+    state.messages.push(...functionResponses);
+
     let abort = false;
-    for (const toolCall of toolCalls) {
+    for (const i in toolCalls) {
+      const toolCall = toolCalls[i];
       const fn = toolCall.function.name;
       if (Agent[fn] && !abort) {
         console.log(`${context.name} calling ${fn}...`);
-
         const args = parseArgs(toolCall.function.arguments);
         console.log("args", args);
         const middlewareData = { fn, state, input, agents, args };
         await runMiddleware(middleware.before[fn], middlewareData);
 
-        if (!shouldContinue(state, ["$$$"])) {
-          fnResponseMessages.push({
-            tool_call_id: toolCall.id,
-            role: "tool",
-            name: fn,
-            content: "function all aborted",
-          });
+        if (!shouldContinue(state)) {
+          functionResponses[i].content = "function all aborted";
           abort = true;
           break;
         }
         try {
-          const functionResponse = await Agent[fn].apply(Agent, [
+          const functionOutput = await Agent[fn].apply(Agent, [
             args,
             { agents, state, fn, input },
           ]);
-          console.log(`${context.name} ${fn} output: ${functionResponse}`);
-          context.output = functionResponse;
-          fnResponseMessages.push({
-            tool_call_id: toolCall.id,
-            role: "tool",
-            name: fn,
-            content: getStringValue(functionResponse),
-          });
+          console.log(`${context.name} ${fn} output: ${functionOutput}`);
+          context.output = functionOutput;
+          functionResponses[i].content = getStringValue(functionOutput);
           if (!shouldContinue(state, [fn])) {
             abort = true;
             break;
           }
           await runMiddleware(middleware.after[fn], middlewareData);
-
-          if (!shouldContinue(state, [fn])) {
+          if (!shouldContinue(state)) {
             abort = true;
           }
           // if (exitConditions.functionCall.includes(fn)) abort = true;
         } catch (error) {
           console.log(`${context.name}.${fn} error:`, error, state, toolCall);
           state.errors.push(error);
-          fnResponseMessages.push({
-            tool_call_id: toolCall.id,
-            role: "tool",
-            name: fn,
-            content: error.message ? `error: ${error.message}` : "unexpected error",
-          });
+          functionResponses[i].content = error.message
+            ? `error: ${error.message}`
+            : "unexpected error";
         }
       } else if (!exitConditions.functionCall.includes(fn) || abort) {
         const error = { message: "function call aborted", status: 400 };
         state.errors.push(error);
-        fnResponseMessages.push({
-          tool_call_id: toolCall.id,
-          role: "tool",
-          name: fn,
-          content: "function call aborted",
-        });
+        functionResponses[i].content = "function all aborted";
         console.log("skipping this one", toolCall);
       }
     }
-    return fnResponseMessages;
   }
   let consecutiveNonFunctionCalls = 0;
   function shouldContinue(state, fnCalls) {
     const { exitConditions } = context;
     const { iterations, errors } = state;
-    if (!fnCalls.length) {
-      consecutiveNonFunctionCalls++;
-    } else if (!fnCalls[0].startsWith("$")) {
-      consecutiveNonFunctionCalls = 0;
-    }
-    // console.log(
-    //   "consecutiveNonFunctionCalls fnCalls, shortCircuit",
-    //   consecutiveNonFunctionCalls,
-    //   fnCalls,
-    //   exitConditions.shortCircuit
-    // );
+    console.log("fnCalls", fnCalls);
+    if (fnCalls) {
+      if (fnCalls.length === 0) {
+        consecutiveNonFunctionCalls++;
+      } else {
+        consecutiveNonFunctionCalls = 0;
+      }
+    } else fnCalls = [];
+    console.log(
+      "consecutiveNonFunctionCalls fnCalls, shortCircuit",
+      consecutiveNonFunctionCalls,
+      fnCalls,
+      exitConditions.shortCircuit
+    );
     return !(
       (exitConditions.shortCircuit &&
-        !consecutiveNonFunctionCalls >= exitConditions.shortCircuit) ||
+        consecutiveNonFunctionCalls >= exitConditions.shortCircuit) ||
       (exitConditions.functionCall &&
         exitConditions.functionCall.some((fn) => fnCalls.includes(fn))) ||
       (exitConditions.iterations && iterations >= exitConditions.iterations) ||
@@ -154,7 +149,7 @@ export default function agentRequestHandler(Agent, context, input, state) {
     state.iterations = 0;
     state.errors = [];
     let currentProvider = "";
-    let fnCalls = ["$invoke"];
+    let fnCalls = null;
     await runMiddleware(middleware.before.$invoke, {
       fn: "$invoke",
       state,
@@ -187,23 +182,29 @@ export default function agentRequestHandler(Agent, context, input, state) {
           agents,
         });
         const response = await llm.invoke(options);
-        if (true) {
-          const m = options.messages[options.messages.length - 1];
-          console.log(`${context.name} ${m.role}: ${m.content}`);
-          // console.log(`${context.name} state:`, state.messages);
-        }
         context.output = response.message.content;
+        state.messages.push(response.message);
+        if (true) {
+          console.log(`${context.name} state:`, state.messages);
+          const lastMessage = state.messages[state.messages.length - 1];
+          //   const content = typeof lastMessage.content === 'array'?lastMessage.content
+          console.log(`role: ${lastMessage.role} content:`, lastMessage.content);
+          // console.log("systemMessage", systemMessage);
+        }
         if (response.functionCalls) {
           fnCalls = response.functionCalls.map(({ function: fn }) => fn.name);
-          const fnResponseMessages = await callFunctions(response.functionCalls);
-          state.messages.push(response.message, ...fnResponseMessages);
-        } else {
-          state.messages.push(response.message);
+          await callFunctions(response.functionCalls);
+        }
+        if (true) {
+          console.log(
+            `${context.name} ${response.message.role}: ${response.message.content}`
+          );
         }
       } catch (error) {
         console.log(
           `${context.name} request error:`,
-          state.messages[state.messages.length - 2].tool_calls
+          state.messages[state.messages.length - 2].tool_calls,
+          error
         );
         throw error;
       } finally {
@@ -217,12 +218,14 @@ export default function agentRequestHandler(Agent, context, input, state) {
       }
       state.iterations++;
     }
+    console.log("exiting the loop...");
     await runMiddleware(middleware.after.$invoke, {
       fn: "$invoke",
       state,
       input,
       agents,
     });
+    console.log("returning output", context.output);
     return context.output;
   }
 

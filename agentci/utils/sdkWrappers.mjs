@@ -58,7 +58,114 @@ function openaiWrapper(openai) {
     }
     return { role: "user", content };
   }
-  return { invoke, validateSchema, parseInput };
+  function normalizeMessages(messages) {
+    return messages.map((message) => {
+      let normalizedMessage = {
+        role: message.role,
+        date: new Date().toISOString(),
+      };
+
+      // Handle content
+      if (message.content) {
+        if (typeof message.content === "string") {
+          normalizedMessage.message = message.content;
+        } else if (Array.isArray(message.content)) {
+          const textContent = message.content.find((item) => item.type === "text");
+          if (textContent) {
+            normalizedMessage.message = textContent.text;
+          }
+
+          const imageUrls = message.content
+            .filter((item) => item.type === "image_url")
+            .map((item) => item.image_url);
+
+          if (imageUrls.length === 1) {
+            normalizedMessage.image = imageUrls[0];
+          } else if (imageUrls.length > 1) {
+            normalizedMessage.images = imageUrls;
+          }
+        }
+      }
+
+      // Handle function calls
+      if (message.tool_calls) {
+        normalizedMessage.tool_calls = message.tool_calls.map((tool_call) => ({
+          id: tool_call.id,
+          type: tool_call.type,
+          function: {
+            name: tool_call.function.name,
+            arguments: tool_call.function.arguments,
+          },
+        }));
+
+        // Create a string representation of tool calls
+        normalizedMessage.message = message.tool_calls
+          .map((tool_call) => `calling ${tool_call.function.name}(...)`)
+          .join("\n");
+      }
+
+      // Ensure there's always a message property
+      if (!normalizedMessage.message) {
+        normalizedMessage.message = "";
+      }
+
+      // Include user if present
+      if (message.user) {
+        normalizedMessage.user = message.user;
+      }
+
+      return normalizedMessage;
+    });
+  }
+
+  function deNormalizeMessages(normalizedMessages) {
+    return normalizedMessages.map((normalizedMessage) => {
+      let deNormalizedMessage = {
+        role: normalizedMessage.role,
+      };
+
+      // Reconstruct content
+      if (
+        normalizedMessage.image !== undefined ||
+        normalizedMessage.images !== undefined
+      ) {
+        deNormalizedMessage.content = [];
+
+        if (normalizedMessage.message) {
+          deNormalizedMessage.content.push({
+            type: "text",
+            text: normalizedMessage.message,
+          });
+        }
+
+        if (normalizedMessage.image !== undefined) {
+          deNormalizedMessage.content.push({
+            type: "image_url",
+            image_url: normalizedMessage.image,
+          });
+        } else if (normalizedMessage.images) {
+          normalizedMessage.images.forEach((image) => {
+            deNormalizedMessage.content.push({ type: "image_url", image_url: image });
+          });
+        }
+      } else {
+        deNormalizedMessage.content = normalizedMessage.message;
+      }
+
+      // Reconstruct tool calls
+      if (normalizedMessage.tool_calls) {
+        deNormalizedMessage.tool_calls = normalizedMessage.tool_calls;
+      }
+
+      // Include user if present
+      if (normalizedMessage.user) {
+        deNormalizedMessage.user = normalizedMessage.user;
+      }
+
+      return deNormalizedMessage;
+    });
+  }
+  return { invoke, validateSchema, parseInput, normalizeMessages, deNormalizeMessages };
 }
 export default {
   openai: openaiWrapper,

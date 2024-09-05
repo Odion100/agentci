@@ -110,9 +110,10 @@ export default function createAgentModule(systemContext) {
           internalContext.exitConditions
         );
         const middleware = getMiddleware();
-        const agentList = [...conf.agents, ...internalContext.agents];
+        // const agentList = [...conf.agents, ...internalContext.agents];
         const agents = systemContext.Agents.reduce((results, { name, module }) => {
-          if (agentList.includes(name)) results[name] = module;
+          // if (agentList.includes(name))
+          results[name] = module;
           return results;
         }, {});
         // console.log("agents", agents);
@@ -146,7 +147,18 @@ export default function createAgentModule(systemContext) {
       const userInput = typeof input === "string" ? { message: input } : input;
       return agentRequestHandler(agent, context, userInput, state);
     }
-    return { invoke };
+    function insertMessage(input) {
+      const userInput = typeof input === "string" ? { message: input } : input;
+      const parsedInput = context.llm.parseInput(userInput);
+      state.messages.push(parsedInput);
+    }
+
+    function getNormalizedMessages(messages = state.messages) {
+      console.log("getNormalizedMessages", messages);
+      if (context) return context.llm.normalizeMessages(messages);
+      else return [];
+    }
+    return { invoke, insertMessage, getNormalizedMessages };
   };
 }
 function addMiddleware(name, mwList, middlewareMap) {
