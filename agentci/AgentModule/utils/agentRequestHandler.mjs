@@ -158,6 +158,13 @@ export default function agentRequestHandler(Agent, context, input, state) {
     });
     while (shouldContinue(state, fnCalls)) {
       fnCalls = [];
+      await runMiddleware(middleware.before.$all, {
+        fn: "$all",
+        functionCalls: fnCalls,
+        state,
+        input,
+        agents,
+      });
       systemMessage.content = getDynamicValue("prompt");
       const options = {
         model: getDynamicValue("model"),
@@ -174,13 +181,6 @@ export default function agentRequestHandler(Agent, context, input, state) {
       }
 
       try {
-        await runMiddleware(middleware.before.$all, {
-          fn: "$all",
-          functionCalls: fnCalls,
-          state,
-          input,
-          agents,
-        });
         const response = await llm.invoke(options);
         context.output = response.message.content;
         state.messages.push(response.message);
