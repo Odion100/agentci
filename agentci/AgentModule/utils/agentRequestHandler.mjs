@@ -11,13 +11,11 @@ export default function agentRequestHandler(Agent, context, input, state) {
         if (typeof mwOptions === "object" && mwOptions.hasOwnProperty("return")) {
           context.output = mwOptions.return || mwOptions.output;
         }
-        console.log("shouldContinue(state)", shouldContinue(state));
         if (!shouldContinue(state)) break;
       } catch (error) {
         console.log(`${context.name}[middleware] error:`, error);
       }
     }
-    console.log("middleware list", mwList);
   }
 
   function parseArgs(args) {

@@ -12,7 +12,7 @@ export default function createAgentModule(systemContext) {
 
     const internalContext = {
       agents: [],
-      exitConditions: { iterations: 0, errors: 0, functionCall: ["finished"] },
+      exitConditions: { iterations: 0, errors: 0, functionCall: [], shortCircuit: 0 },
       middleware: {
         before: {},
         after: {},
@@ -33,7 +33,7 @@ export default function createAgentModule(systemContext) {
         if (typeof options.exitConditions.functionCall === "string") {
           options.exitConditions.functionCall = [options.exitConditions.functionCall];
         } else if (!Array.isArray(options.exitConditions.functionCall)) {
-          options.exitConditions.functionCall = ["finished"];
+          options.exitConditions.functionCall = [];
         }
         if (options.exitConditions.functionCall.includes("$all")) {
           const i = options.exitConditions.functionCall.indexOf("$all");
@@ -45,6 +45,7 @@ export default function createAgentModule(systemContext) {
         internalContext.exitConditions,
         options.exitConditions
       );
+      checkExitConditions(options.exitConditions, name);
       Object.assign(internalContext, options);
     };
 
@@ -174,5 +175,53 @@ function addMiddleware(name, mwList, middlewareMap) {
     if (Array.isArray(middleware)) return middleware.map(addMiddleware);
     if (!middlewareMap[name]) middlewareMap[name] = [];
     middlewareMap[name].push(middleware);
+  }
+}
+function checkExitConditions(exitConditions, name) {
+  const validExitConditions = ["iterations", "functionCall", "shortCircuit", "state"];
+  let hasValidExitCondition = false;
+
+  for (const condition of validExitConditions) {
+    if (condition in exitConditions) {
+      if (condition === "state") {
+        if (typeof exitConditions[condition] === "function") {
+          hasValidExitCondition = true;
+          break;
+        }
+      } else if (condition === "functionCall") {
+        if (
+          Array.isArray(exitConditions[condition]) &&
+          exitConditions[condition].length > 0
+        ) {
+          hasValidExitCondition = true;
+          break;
+        }
+      } else if (exitConditions[condition] > 0) {
+        hasValidExitCondition = true;
+        break;
+      }
+    }
+  }
+
+  if (!hasValidExitCondition) {
+    throw Error(`Agentci ${name} module: No valid exit condition set. Please set at least one of the following exit conditions to prevent indefinite looping:
+    - iterations: Set a number greater than 0 to limit the number of iterations.
+    - functionCall: Provide an array of function names to exit when one of these functions is called.
+    - shortCircuit: Set a number greater than 0 to exit after consecutive iterations without a function call.
+    - state: Provide a function that returns a boolean to determine when to exit based on the state.
+    Example:
+    function YourAgent() {
+      this.use({
+        ...
+        exitConditions: {
+          iterations: 5,                                   // Exit after 5 iterations
+          errors: 2,                                       // Exit after 2 errors
+          functionCall: ["someFunction"],                  // Exit when someFunction is called
+          shortCircuit: 3,                                 // Exit after 3 consecutive non-function calls
+          state: (state) => state.someCondition            // Exit when someCondition is true
+        },
+        ...
+      });
+    }`);
   }
 }

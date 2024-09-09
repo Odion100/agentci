@@ -37,9 +37,10 @@ function createAgentci() {
   };
 
   Agentci.rootAgent = (__constructor) => {
-    rootModule = createModule(__constructor, "$root");
+    const name = __constructor.name || "$root";
+    rootModule = createModule(__constructor, name);
     systemContext.Agents.push({
-      name: "$root",
+      name,
       module: rootModule,
     });
     // console.log("rootModule-->", rootModule);

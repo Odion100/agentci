@@ -9,7 +9,7 @@ export default function ConfigModule(constructor) {
 
   const internalContext = {
     agents: [],
-    exitConditions: { iterations: 0, errors: 0, functionCall: ["finished"] },
+    exitConditions: { iterations: 0, errors: 0, functionCall: [] },
     middleware: {
       before: {},
       after: {},
@@ -30,7 +30,7 @@ export default function ConfigModule(constructor) {
       if (typeof options.exitConditions.functionCall === "string") {
         options.exitConditions.functionCall = [options.exitConditions.functionCall];
       } else if (!Array.isArray(options.exitConditions.functionCall)) {
-        options.exitConditions.functionCall = ["finished"];
+        options.exitConditions.functionCall = [];
       }
       if (options.exitConditions.functionCall.includes("$all")) {
         const i = options.exitConditions.functionCall.indexOf("$all");

@@ -2,30 +2,30 @@ import imageEncoder from "./imageEncoder.mjs";
 
 function openaiWrapper(openai) {
   function validateSchema(schema, exitConditions) {
-    schema = typeof schema === "function" ? schema(state) : schema;
-    //later add yum schema validations
+    // schema = typeof schema === "function" ? schema(state) : schema;
+    // //later add yum schema validations
 
-    const fnExists = schema.some((tool) =>
-      exitConditions.functionCall.includes(tool.function.name)
-    );
-    if (!fnExists) {
-      schema.push({
-        type: "function",
-        function: {
-          name: exitConditions.functionCall[0],
-          description: "Indicate that you are finished with the task",
-          parameters: {
-            type: "object",
-            properties: {
-              response: {
-                type: "string",
-                description: "a response to return to the user if necessary",
-              },
-            },
-          },
-        },
-      });
-    }
+    // const fnExists = schema.some((tool) =>
+    //   exitConditions.functionCall.includes(tool.function.name)
+    // );
+    // if (!fnExists && !exitConditions.shortCircuit && !exitConditions.iterations) {
+    //   schema.push({
+    //     type: "function",
+    //     function: {
+    //       name: exitConditions.functionCall[0],
+    //       description: "Indicate that you are finished with the task",
+    //       parameters: {
+    //         type: "object",
+    //         properties: {
+    //           response: {
+    //             type: "string",
+    //             description: "a response to return to the user if necessary",
+    //           },
+    //         },
+    //       },
+    //     },
+    //   });
+    // }
     return schema;
   }
 
