@@ -1,0 +1,32 @@
+[
+  {
+    "title": "Calculator runs the real Claude tool loop",
+    "namespace": { "serviceId": "Framework", "moduleName": "Calculator", "methodName": "invoke" },
+    "Before": [],
+    "Main": [
+      {
+        "title": "(7 × 6) − 12 through tool calls",
+        "namespace": { "serviceId": "Framework", "moduleName": "Calculator", "methodName": "invoke" },
+        "args": [
+          {
+            "name": "argument:",
+            "input": "what is (7 times 6) minus 12?",
+            "input_type": "string",
+            "data_type": "",
+            "targetValues": []
+          }
+        ],
+        "savedEvaluations": [
+          {
+            "namespace": "results.answer",
+            "expected_type": "number",
+            "validations": [{ "name": "numEquals", "value": 30 }],
+            "save": true
+          }
+        ]
+      }
+    ],
+    "Events": [],
+    "After": []
+  }
+]

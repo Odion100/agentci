@@ -1,0 +1,32 @@
+[
+  {
+    "title": "Summarizer answers with plain text (no tools, shortCircuit exit)",
+    "namespace": { "serviceId": "Framework", "moduleName": "Summarizer", "methodName": "invoke" },
+    "Before": [],
+    "Main": [
+      {
+        "title": "one-sentence summary",
+        "namespace": { "serviceId": "Framework", "moduleName": "Summarizer", "methodName": "invoke" },
+        "args": [
+          {
+            "name": "argument:",
+            "input": "The agentci framework supports OpenAI and Anthropic providers through a shared message format, so agents can switch providers mid-execution without losing conversation state.",
+            "input_type": "string",
+            "data_type": "",
+            "targetValues": []
+          }
+        ],
+        "savedEvaluations": [
+          {
+            "namespace": "results",
+            "expected_type": "string",
+            "validations": [{ "name": "isLike", "value": "agentci" }],
+            "save": true
+          }
+        ]
+      }
+    ],
+    "Events": [],
+    "After": []
+  }
+]

@@ -1,0 +1,75 @@
+[
+  {
+    "title": "Execution loop scenarios (mock SDKs — free, no API key)",
+    "namespace": { "serviceId": "Framework", "moduleName": "Loops", "methodName": "anthropicToolLoop" },
+    "Before": [],
+    "Main": [
+      {
+        "title": "anthropic tool loop exits on finish",
+        "namespace": { "serviceId": "Framework", "moduleName": "Loops", "methodName": "anthropicToolLoop" },
+        "args": [],
+        "savedEvaluations": [
+          {
+            "namespace": "results.exitedOnFinish",
+            "expected_type": "boolean",
+            "validations": [{ "name": "boolEquals", "value": true }],
+            "save": true
+          },
+          {
+            "namespace": "results.modelCalls",
+            "expected_type": "number",
+            "validations": [{ "name": "numEquals", "value": 2 }],
+            "save": true
+          }
+        ]
+      },
+      {
+        "title": "provider switches mid-run",
+        "namespace": { "serviceId": "Framework", "moduleName": "Loops", "methodName": "providerSwitch" },
+        "args": [],
+        "savedEvaluations": [
+          {
+            "namespace": "results.output",
+            "expected_type": "string",
+            "validations": [{ "name": "strEquals", "value": "from claude" }],
+            "save": true
+          },
+          {
+            "namespace": "results.openaiCalls",
+            "expected_type": "number",
+            "validations": [{ "name": "numEquals", "value": 1 }],
+            "save": true
+          }
+        ]
+      },
+      {
+        "title": "global config exit conditions honored",
+        "namespace": { "serviceId": "Framework", "moduleName": "Loops", "methodName": "globalExitConditions" },
+        "args": [],
+        "savedEvaluations": [
+          {
+            "namespace": "results.toolsOmittedWhenSchemaEmpty",
+            "expected_type": "boolean",
+            "validations": [{ "name": "boolEquals", "value": true }],
+            "save": true
+          }
+        ]
+      },
+      {
+        "title": "falsy caller state survives the merge",
+        "namespace": { "serviceId": "Framework", "moduleName": "Loops", "methodName": "falsyStateMerge" },
+        "args": [],
+        "savedEvaluations": [
+          {
+            "namespace": "results.callerFalsyValueSurvived",
+            "expected_type": "boolean",
+            "validations": [{ "name": "boolEquals", "value": true }],
+            "save": true
+          }
+        ]
+      }
+    ],
+    "Events": [],
+    "After": []
+  }
+]

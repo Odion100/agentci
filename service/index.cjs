@@ -16,6 +16,7 @@ const Tests = {
     "../agentci/utils/sdkWrappers/validateSchema.mjs"
   );
   const Loops = await import("./loops.mjs");
+  const { Calculator, Summarizer, Team } = await import("./agents.mjs");
 
   // Real framework objects passed straight in as modules — probing these calls
   // the exact functions the execution loop uses, not test doubles.
@@ -43,7 +44,10 @@ const Tests = {
       providerSwitch: Loops.providerSwitch,
       globalExitConditions: Loops.globalExitConditions,
       falsyStateMerge: Loops.falsyStateMerge,
-    });
+    })
+    .module("Calculator", Calculator)
+    .module("Summarizer", Summarizer)
+    .module("Team", Team);
 
   const SystemViewPlugin = require("systemview-plugin")({
     connection: process.env.SYSTEMVIEW_HOST || "http://localhost:3000/systemview/api",

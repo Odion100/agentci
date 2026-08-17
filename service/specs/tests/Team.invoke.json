@@ -1,0 +1,32 @@
+[
+  {
+    "title": "Team coordinator delegates to the Poet agent",
+    "namespace": { "serviceId": "Framework", "moduleName": "Team", "methodName": "invoke" },
+    "Before": [],
+    "Main": [
+      {
+        "title": "poem request routed through askPoet",
+        "namespace": { "serviceId": "Framework", "moduleName": "Team", "methodName": "invoke" },
+        "args": [
+          {
+            "name": "argument:",
+            "input": "I need a short poem about agents testing agents",
+            "input_type": "string",
+            "data_type": "",
+            "targetValues": []
+          }
+        ],
+        "savedEvaluations": [
+          {
+            "namespace": "results",
+            "expected_type": "string",
+            "validations": [],
+            "save": true
+          }
+        ]
+      }
+    ],
+    "Events": [],
+    "After": []
+  }
+]
