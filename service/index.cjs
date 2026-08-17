@@ -44,6 +44,11 @@ const Tests = {
       providerSwitch: Loops.providerSwitch,
       globalExitConditions: Loops.globalExitConditions,
       falsyStateMerge: Loops.falsyStateMerge,
+      strictOutputs: Loops.strictOutputs,
+      streamingLoop: Loops.streamingLoop,
+      parallelToolsRace: Loops.parallelToolsRace,
+      nativeToolPassthrough: Loops.nativeToolPassthrough,
+      mcpToolLoop: Loops.mcpToolLoop,
     })
     .module("Calculator", Calculator)
     .module("Summarizer", Summarizer)

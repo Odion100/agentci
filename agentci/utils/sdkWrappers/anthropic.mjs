@@ -5,6 +5,7 @@ import {
   deNormalizeMessages,
 } from "./messageFormat.mjs";
 import validateSchema from "./validateSchema.mjs";
+import withRetry from "./retry.mjs";
 
 export function toImageBlock(imageUrl) {
   const url = typeof imageUrl === "string" ? imageUrl : imageUrl.url;
@@ -86,12 +87,23 @@ export function convertRequest(payload) {
   if (system) request.system = system;
   if (payload.temperature !== undefined) request.temperature = payload.temperature;
   if (payload.tools && payload.tools.length) {
-    request.tools = payload.tools.map(({ function: fn }) => ({
-      name: fn.name,
-      description: fn.description,
-      input_schema: fn.parameters,
-    }));
+    request.tools = payload.tools.map((tool) => {
+      if (tool.type !== "function") return tool;
+      const converted = {
+        name: tool.function.name,
+        description: tool.function.description,
+        input_schema: tool.function.parameters,
+      };
+      if (payload.strict) converted.strict = true;
+      return converted;
+    });
     request.tool_choice = { type: "auto" };
+  }
+  if (payload.responseSchema) {
+    const responseSchema = payload.responseSchema;
+    request.output_config = {
+      format: { type: "json_schema", schema: responseSchema.schema || responseSchema },
+    };
   }
   return request;
 }
@@ -118,7 +130,17 @@ export function convertResponse(response) {
 
 export default function anthropicWrapper(anthropic) {
   async function invoke(payload) {
-    const response = await anthropic.messages.create(convertRequest(payload));
+    const { retries, onToken } = payload;
+    const request = convertRequest(payload);
+    if (!onToken) {
+      const response = await withRetry(() => anthropic.messages.create(request), retries);
+      return convertResponse(response);
+    }
+    const response = await withRetry(() => {
+      const stream = anthropic.messages.stream(request);
+      stream.on("text", onToken);
+      return stream.finalMessage();
+    }, retries);
     return convertResponse(response);
   }
 

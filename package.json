@@ -19,6 +19,7 @@
   "homepage": "https://github.com/Odion100/agentci#readme",
   "devDependencies": {
     "@anthropic-ai/sdk": "^0.117.1",
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "cz-conventional-changelog": "^3.3.0",
     "systemlynx": "^3.3.2",
     "systemview-plugin": "^2.21.0"

@@ -36,6 +36,42 @@ export default function agentRequestHandler(Agent, context, input, state) {
     }));
     state.messages.push(...functionResponses);
 
+    if (getDynamicValue("parallelTools") && toolCalls.length > 1) {
+      // Parallel mode trades mid-batch aborts for concurrency: exit conditions are
+      // evaluated after the whole batch, not between calls.
+      await Promise.all(
+        toolCalls.map(async (toolCall, i) => {
+          const fn = toolCall.function.name;
+          if (!Agent[fn]) {
+            if (!exitConditions.functionCall.includes(fn)) {
+              state.errors.push({ message: "function call aborted", status: 400 });
+              functionResponses[i].content = "function call aborted";
+            }
+            return;
+          }
+          const args = parseArgs(toolCall.function.arguments);
+          const middlewareData = { fn, state, input, agents, args };
+          await runMiddleware(middleware.before[fn], middlewareData);
+          try {
+            const functionOutput = await Agent[fn].apply(Agent, [
+              args,
+              { agents, state, fn, input },
+            ]);
+            context.output = functionOutput;
+            functionResponses[i].content = getStringValue(functionOutput);
+            await runMiddleware(middleware.after[fn], middlewareData);
+          } catch (error) {
+            console.error(`${context.name}.${fn} error:`, error);
+            state.errors.push(error);
+            functionResponses[i].content = error.message
+              ? `error: ${error.message}`
+              : "unexpected error";
+          }
+        })
+      );
+      return;
+    }
+
     let abort = false;
     for (const i in toolCalls) {
       const toolCall = toolCalls[i];
@@ -110,8 +146,10 @@ export default function agentRequestHandler(Agent, context, input, state) {
       [
         ...dynamicSchema(context.schemas.default),
         ...dynamicSchema(context.schemas.internal),
+        ...dynamicSchema(context.schemas.mcp),
       ],
-      context.exitConditions
+      context.exitConditions,
+      getDynamicValue("strict")
     );
   }
   function getDynamicValue(option) {
@@ -168,6 +206,12 @@ export default function agentRequestHandler(Agent, context, input, state) {
       const max_tokens = getDynamicValue("max_tokens");
       if (temperature !== undefined) options.temperature = temperature;
       if (max_tokens !== undefined) options.max_tokens = max_tokens;
+      for (const opt of ["strict", "responseSchema", "retries"]) {
+        const value = getDynamicValue(opt);
+        if (value !== undefined) options[opt] = value;
+      }
+      // onToken is a callback, not a dynamic value — never resolve it
+      if (context.onToken !== undefined) options.onToken = context.onToken;
       const tools = getSchema(llm);
       if (tools.length) {
         options.tools = tools;

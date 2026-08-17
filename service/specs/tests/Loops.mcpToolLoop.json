@@ -1,0 +1,124 @@
+[
+  {
+    "title": "RFC modern-core scenarios (mock SDKs + real MCP stdio server — free, no API key)",
+    "namespace": { "serviceId": "Framework", "moduleName": "Loops", "methodName": "mcpToolLoop" },
+    "Before": [],
+    "Main": [
+      {
+        "title": "MCP tools flow through the middleware chain",
+        "namespace": { "serviceId": "Framework", "moduleName": "Loops", "methodName": "mcpToolLoop" },
+        "args": [],
+        "savedEvaluations": [
+          {
+            "namespace": "results.output",
+            "expected_type": "string",
+            "validations": [{ "name": "strEquals", "value": "[echo] echo: intercepted" }],
+            "save": true
+          },
+          {
+            "namespace": "results.middlewareSawOriginalArgs",
+            "expected_type": "boolean",
+            "validations": [{ "name": "boolEquals", "value": true }],
+            "save": true
+          },
+          {
+            "namespace": "results.middlewareRewroteArgs",
+            "expected_type": "boolean",
+            "validations": [{ "name": "boolEquals", "value": true }],
+            "save": true
+          }
+        ]
+      },
+      {
+        "title": "strict outputs reach both wires in the provider's own shape",
+        "namespace": { "serviceId": "Framework", "moduleName": "Loops", "methodName": "strictOutputs" },
+        "args": [],
+        "savedEvaluations": [
+          {
+            "namespace": "results.openaiWire.strictOnFunctionDef",
+            "expected_type": "boolean",
+            "validations": [{ "name": "boolEquals", "value": true }],
+            "save": true
+          },
+          {
+            "namespace": "results.anthropicWire.strictOnToolDef",
+            "expected_type": "boolean",
+            "validations": [{ "name": "boolEquals", "value": true }],
+            "save": true
+          },
+          {
+            "namespace": "results.openaiWire.response_format.type",
+            "expected_type": "string",
+            "validations": [{ "name": "strEquals", "value": "json_schema" }],
+            "save": true
+          },
+          {
+            "namespace": "results.anthropicWire.output_config.format.type",
+            "expected_type": "string",
+            "validations": [{ "name": "strEquals", "value": "json_schema" }],
+            "save": true
+          }
+        ]
+      },
+      {
+        "title": "streaming assembles the final message and emits tokens",
+        "namespace": { "serviceId": "Framework", "moduleName": "Loops", "methodName": "streamingLoop" },
+        "args": [],
+        "savedEvaluations": [
+          {
+            "namespace": "results.finalMessageAssembled",
+            "expected_type": "boolean",
+            "validations": [{ "name": "boolEquals", "value": true }],
+            "save": true
+          },
+          {
+            "namespace": "results.streamFlagSent",
+            "expected_type": "boolean",
+            "validations": [{ "name": "boolEquals", "value": true }],
+            "save": true
+          }
+        ]
+      },
+      {
+        "title": "sequential stays default; parallelTools opts in",
+        "namespace": { "serviceId": "Framework", "moduleName": "Loops", "methodName": "parallelToolsRace" },
+        "args": [],
+        "savedEvaluations": [
+          {
+            "namespace": "results.sequentialPreservesCallOrder",
+            "expected_type": "boolean",
+            "validations": [{ "name": "boolEquals", "value": true }],
+            "save": true
+          },
+          {
+            "namespace": "results.parallelLetsQuickWin",
+            "expected_type": "boolean",
+            "validations": [{ "name": "boolEquals", "value": true }],
+            "save": true
+          }
+        ]
+      },
+      {
+        "title": "provider-native tools pass to the wire untouched",
+        "namespace": { "serviceId": "Framework", "moduleName": "Loops", "methodName": "nativeToolPassthrough" },
+        "args": [],
+        "savedEvaluations": [
+          {
+            "namespace": "results.nativeToolSentUntouched.type",
+            "expected_type": "string",
+            "validations": [{ "name": "strEquals", "value": "computer_20251124" }],
+            "save": true
+          },
+          {
+            "namespace": "results.consumerExecutorRan",
+            "expected_type": "boolean",
+            "validations": [{ "name": "boolEquals", "value": true }],
+            "save": true
+          }
+        ]
+      }
+    ],
+    "Events": [],
+    "After": []
+  }
+]

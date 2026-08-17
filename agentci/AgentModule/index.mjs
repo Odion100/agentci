@@ -27,7 +27,18 @@ export default function createAgentModule(systemContext) {
       args.push(state);
       emitter.emit(name, ...args);
     };
-    const reservedKeys = ["use", "before", "after"];
+    const reservedKeys = ["use", "before", "after", "mcp"];
+    // Tool sources share one adapter contract: connect() resolves to
+    // { tools: [{ name, description, inputSchema }], callTool(name, args), close() }.
+    // this.mcp is the first adapter; remote-service adapters (lynx) plug in the same way.
+    const toolSources = [];
+    const sourceSchema = [];
+    Agent.mcp = (spec, options = {}) => {
+      toolSources.push({
+        connect: () => import("../utils/mcp.mjs").then(({ connectMcp }) => connectMcp(spec)),
+        options,
+      });
+    };
     Agent.use = (options) => {
       const hasExitConditions = !!options.exitConditions;
       if (hasExitConditions) {
@@ -102,9 +113,46 @@ export default function createAgentModule(systemContext) {
       }
       return newState;
     }
+    let sourcesReady = null;
+    async function registerToolSources() {
+      for (const { connect, options } of toolSources) {
+        const connection = await connect();
+        systemContext.connections.push(connection);
+        const allowed = options.tools;
+        for (const tool of connection.tools) {
+          if (Array.isArray(allowed) && !allowed.includes(tool.name)) continue;
+          const toolName = options.prefix ? `${options.prefix}_${tool.name}` : tool.name;
+          if (Agent[toolName]) {
+            throw Error(
+              `[Agentci Error]: tool "${toolName}" collides with an existing method on ${name}. Pass { prefix: "..." } to namespace the source's tools.`
+            );
+          }
+          Agent[toolName] = async (args) => {
+            const result = await connection.callTool(tool.name, args);
+            return options.transformResult
+              ? options.transformResult(tool.name, result)
+              : result;
+          };
+          sourceSchema.push({
+            type: "function",
+            function: {
+              name: toolName,
+              description: tool.description || "",
+              parameters: tool.inputSchema,
+            },
+          });
+        }
+      }
+    }
+
     let context = null;
     function invoke(input, inputState = {}) {
       state = mergeStates(inputState);
+      if (toolSources.length && !sourcesReady) sourcesReady = registerToolSources();
+      if (sourcesReady) return sourcesReady.then(() => run(input));
+      return run(input);
+    }
+    function run(input) {
       if (!context) {
         const { config: conf } = systemContext;
         const exitConditions = Object.assign(
@@ -127,7 +175,12 @@ export default function createAgentModule(systemContext) {
           provider: internalContext.provider ?? conf.provider,
           temperature: internalContext.temperature ?? conf.temperature,
           max_tokens: internalContext.max_tokens ?? conf.max_tokens,
-          schemas: { default: conf.schema, internal: internalContext.schema },
+          strict: internalContext.strict ?? conf.strict,
+          responseSchema: internalContext.responseSchema ?? conf.responseSchema,
+          retries: internalContext.retries ?? conf.retries,
+          onToken: internalContext.onToken ?? conf.onToken,
+          parallelTools: internalContext.parallelTools ?? conf.parallelTools,
+          schemas: { default: conf.schema, internal: internalContext.schema, mcp: sourceSchema },
           exitConditions,
           middleware,
           agents,

@@ -120,6 +120,209 @@ export async function globalExitConditions() {
   };
 }
 
+export async function strictOutputs() {
+  const strictParams = {
+    type: "object",
+    additionalProperties: false,
+    required: ["answer"],
+    properties: { answer: { type: "number" } },
+  };
+  const openai = mockOpenai([{ role: "assistant", content: '{"answer":42}' }]);
+  const anthropic = mockAnthropic([
+    { content: [{ type: "text", text: '{"answer":42}' }], stop_reason: "end_turn" },
+  ]);
+  function StrictAgent() {
+    this.use({
+      sdk: ({ state }) => (state.iterations === 0 ? openai : anthropic),
+      provider: ({ state }) => (state.iterations === 0 ? "openai" : "anthropic"),
+      model: "m",
+      prompt: "p",
+      strict: true,
+      responseSchema: { name: "answer", schema: strictParams },
+      schema: [
+        {
+          type: "function",
+          function: { name: "noop", description: "noop", parameters: strictParams },
+        },
+      ],
+      exitConditions: { iterations: 2 },
+    });
+    this.noop = ({ answer }) => answer;
+  }
+  await Agentci().rootAgent(StrictAgent).invoke("answer");
+  return {
+    openaiWire: {
+      strictOnFunctionDef: openai.captured[0].tools[0].function.strict === true,
+      response_format: openai.captured[0].response_format,
+    },
+    anthropicWire: {
+      strictOnToolDef: anthropic.captured[0].tools[0].strict === true,
+      output_config: anthropic.captured[0].output_config,
+    },
+  };
+}
+
+export async function streamingLoop() {
+  const tokens = [];
+  const captured = [];
+  const openai = {
+    captured,
+    chat: {
+      completions: {
+        create: async (payload) => {
+          captured.push(JSON.parse(JSON.stringify(payload)));
+          return (async function* () {
+            for (const word of ["streamed", " token", " by", " token"]) {
+              yield { choices: [{ delta: { content: word } }] };
+            }
+          })();
+        },
+      },
+    },
+  };
+  function StreamAgent() {
+    this.use({
+      sdk: openai,
+      provider: "openai",
+      model: "m",
+      prompt: "p",
+      onToken: (token) => tokens.push(token),
+      exitConditions: { shortCircuit: 1, iterations: 2 },
+    });
+  }
+  const output = await Agentci().rootAgent(StreamAgent).invoke("go");
+  return {
+    output,
+    tokensReceived: tokens,
+    streamFlagSent: openai.captured[0].stream === true,
+    finalMessageAssembled: output === "streamed token by token",
+  };
+}
+
+export async function parallelToolsRace() {
+  const twoCalls = {
+    role: "assistant",
+    content: null,
+    tool_calls: [
+      { id: "c1", type: "function", function: { name: "slow", arguments: "{}" } },
+      { id: "c2", type: "function", function: { name: "quick", arguments: "{}" } },
+    ],
+  };
+  const schema = [
+    { type: "function", function: { name: "slow", description: "slow" } },
+    { type: "function", function: { name: "quick", description: "quick" } },
+  ];
+  async function race(parallelTools) {
+    const openai = mockOpenai([twoCalls, { role: "assistant", content: "done" }]);
+    const order = [];
+    function Racer() {
+      this.use({
+        sdk: openai,
+        provider: "openai",
+        model: "m",
+        prompt: "p",
+        parallelTools,
+        schema,
+        exitConditions: { shortCircuit: 1, iterations: 3 },
+      });
+      this.slow = async () => {
+        await new Promise((resolve) => setTimeout(resolve, 40));
+        order.push("slow");
+        return "slow done";
+      };
+      this.quick = async () => {
+        order.push("quick");
+        return "quick done";
+      };
+    }
+    await Agentci().rootAgent(Racer).invoke("go");
+    return order;
+  }
+  const sequentialOrder = await race(false);
+  const parallelOrder = await race(true);
+  return {
+    sequentialOrder,
+    parallelOrder,
+    sequentialPreservesCallOrder: sequentialOrder.join(",") === "slow,quick",
+    parallelLetsQuickWin: parallelOrder.join(",") === "quick,slow",
+  };
+}
+
+export async function nativeToolPassthrough() {
+  const computerTool = {
+    type: "computer_20251124",
+    name: "computer",
+    display_width_px: 1920,
+    display_height_px: 1080,
+  };
+  const anthropic = mockAnthropic([
+    {
+      content: [{ type: "tool_use", id: "tu_1", name: "computer", input: { action: "screenshot" } }],
+      stop_reason: "tool_use",
+    },
+    { content: [{ type: "text", text: "saw the screen" }], stop_reason: "end_turn" },
+  ]);
+  function ComputerAgent() {
+    this.use({
+      sdk: anthropic,
+      provider: "anthropic",
+      model: "claude-opus-5",
+      prompt: "p",
+      schema: [computerTool],
+      exitConditions: { functionCall: "computer", iterations: 3 },
+    });
+    this.computer = async ({ action }) => `executed ${action}, screenshot attached`;
+  }
+  const output = await Agentci().rootAgent(ComputerAgent).invoke("look at the screen");
+  return {
+    output,
+    nativeToolSentUntouched: anthropic.captured[0].tools[0],
+    consumerExecutorRan: output === "executed screenshot, screenshot attached",
+  };
+}
+
+export async function mcpToolLoop() {
+  const openai = mockOpenai([
+    {
+      role: "assistant",
+      content: null,
+      tool_calls: [
+        { id: "c1", type: "function", function: { name: "pw_echo", arguments: '{"text":"ping"}' } },
+      ],
+    },
+    { role: "assistant", content: "done" },
+  ]);
+  const intercepted = [];
+  const agency = Agentci().rootAgent(function McpAgent() {
+    this.use({
+      sdk: openai,
+      provider: "openai",
+      model: "m",
+      prompt: "p",
+      exitConditions: { functionCall: "pw_echo", iterations: 3 },
+    });
+    this.mcp(
+      { command: process.execPath, args: [new URL("./mcpFixture.mjs", import.meta.url).pathname] },
+      { prefix: "pw", transformResult: (name, text) => `[${name}] ${text}` }
+    );
+    this.before("pw_echo", (data, next) => {
+      intercepted.push(data.args.text);
+      data.args.text = "intercepted";
+      next();
+    });
+  });
+  const output = await agency.invoke("go");
+  const toolsOfferedToModel = openai.captured[0].tools.map((tool) => tool.function.name);
+  await agency.close();
+  return {
+    output,
+    toolsOfferedToModel,
+    middlewareSawOriginalArgs: intercepted[0] === "ping",
+    middlewareRewroteArgs: output === "[echo] echo: intercepted",
+    connectionClosed: true,
+  };
+}
+
 export async function falsyStateMerge() {
   const openai = mockOpenai([{ role: "assistant", content: "ok" }]);
   let stateSeenByMiddleware;

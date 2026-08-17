@@ -465,6 +465,58 @@ The root agent is the primary agent. Additional agents can be registered by name
 
 Each agent can define its own model configuration, schema, prompt, functions, middleware, and exit conditions.
 
+### build()
+
+`.build()` terminates the chain and returns the bare agent surfaces — the root agent's methods plus an `agents` map of every registered agent:
+
+```javascript
+const { invoke, insertMessage, getNormalizedMessages, agents } = Agentci()
+  .rootAgent(Coordinator)
+  .agent("Poet", Poet)
+  .build();
+
+await agents.Poet.invoke("write a haiku");
+```
+
+Use it when mounting agents into another system (RPC services, test harnesses) — the returned object carries no chaining methods, so a spread exposes exactly the agent API. The chaining return also keeps `agent`/`config`/`build`/`close` non-enumerable, so spreading it no longer leaks builder methods either.
+
+---
+
+## MCP Tools
+
+`this.mcp(serverSpec, options?)` connects an agent to an [MCP](https://modelcontextprotocol.io) server and registers the server's tools as agent functions. To the execution loop they are indistinguishable from local methods — `before`/`after` middleware, `$all`, arg mutation, and `functionCall` exit conditions all apply.
+
+```javascript
+function BrowserAgent() {
+  this.use({
+    provider: "anthropic",
+    sdk: anthropicClient,
+    model: "claude-opus-5",
+    prompt: "You drive a browser.",
+    exitConditions: { iterations: 20 },
+  });
+
+  this.mcp(
+    { command: "npx", args: ["@playwright/mcp"] },
+    { prefix: "pw" }
+  );
+
+  this.before("pw_browser_navigate", (data, next) => {
+    if (!data.args.url.startsWith("https://allowed.com")) return; // gate: not calling next() blocks the call
+    next();
+  });
+}
+```
+
+- **serverSpec** — `{ command, args, env? }` spawns a stdio server; `{ url }` connects over streamable HTTP.
+- **options.prefix** — namespaces the server's tools (`pw_click`, ...). A tool name colliding with an existing method throws at registration; prefix is the escape hatch.
+- **options.tools** — allowlist; only the listed server tools are registered.
+- **options.transformResult** — `(toolName, result) => value` post-processes every tool result before it returns to the model (e.g. inlining file links a server responds with).
+
+Connections open lazily at first `invoke`, stay alive across invocations (the server's state — a browser session, open tabs — persists), and close via `agency.close()` or on process exit. If the transport drops mid-run it reconnects once; the registered tool surface never changes within a run.
+
+Requires `@modelcontextprotocol/sdk` in the consuming project (the framework imports it lazily).
+
 ---
 
 ## Configuration
@@ -497,6 +549,62 @@ The object returned by `Agentci().rootAgent(...)` (and by each `.agent()` chain)
 - `invoke(input, state?)` → runs the execution loop; `input` is a string or `{ message, image?, images? }` (image paths are base64-encoded automatically). Returns the final output.
 - `insertMessage(input)` → appends a user message to the conversation without invoking the model — useful for seeding history between invocations.
 - `getNormalizedMessages(messages?)` → returns the conversation in a provider-neutral shape (`{ role, date, message, image?, images?, tool_calls? }`) for display or storage.
+
+---
+
+## Strict Outputs, Streaming, Retries
+
+All of these are `this.use` options (also settable globally via `.config()`); each is translated to the provider's own wire shape by the SDK wrappers.
+
+```javascript
+this.use({
+  // provider-enforced schemas — arguments arrive schema-valid, no retry middleware needed
+  strict: true,
+
+  // constrain the model's text response to a JSON schema
+  responseSchema: {
+    name: "verdict",
+    schema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["answer", "confidence"],
+      properties: { answer: { type: "string" }, confidence: { type: "number" } },
+    },
+  },
+
+  // stream tokens as they generate; the loop still consumes the final message
+  onToken: (token) => process.stdout.write(token),
+
+  // transport-level retry with exponential backoff on 429/5xx/overloaded
+  retries: { attempts: 3, baseDelay: 500 },
+
+  // opt into concurrent execution of one response's tool calls (default is sequential)
+  parallelTools: true,
+});
+```
+
+- **strict** — OpenAI: `strict: true` on function definitions; Anthropic: top-level `strict` on tool definitions. Schemas are preflighted against the stricter provider's limits (every object needs `additionalProperties: false` and a full `required` list; no recursion; no numeric/string min/max).
+- **responseSchema** — OpenAI: `response_format` json_schema; Anthropic: `output_config.format`. Pass `{ name, schema }` or a raw JSON schema.
+- **retries** — a number (attempts) or `{ attempts, baseDelay }`. Only transport-level failures retry; function errors still count toward the `errors` exit condition.
+- **parallelTools** — sequential is the default because per-function middleware ordering and shared-state mutation are load-bearing semantics. Parallel mode evaluates exit conditions after the whole batch.
+
+### Provider-Native Tools
+
+Schema entries whose `type` is not `"function"` (computer use, web search, code execution) pass to the wire untouched, and their results flow back through the loop as ordinary tool results:
+
+```javascript
+this.use({
+  schema: [
+    { type: "computer_20251124", name: "computer", display_width_px: 1920, display_height_px: 1080 },
+  ],
+  exitConditions: { iterations: 10 },
+});
+this.computer = async ({ action, coordinate }) => {
+  // execute the action, return a screenshot for the model
+};
+```
+
+The consumer supplies the executor method under the tool's `name`; middleware wraps it like any other function. (Anthropic's computer use also needs its beta header — set it on the injected SDK client.)
 
 ---
 

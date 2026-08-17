@@ -7,7 +7,7 @@ The agentci framework's live surface on the hub. Two kinds of modules: the frame
 - :ns[MessageFormat] — the shared message helpers every provider wrapper uses: `parseInput`, `normalizeMessages`, `deNormalizeMessages`
 - :ns[Anthropic] — the Claude wrapper's converters: `convertMessages`, `convertRequest`, `convertResponse`, `toImageBlock`
 - :ns[Schema] — `validateSchema`: tool-shape checks plus functionCall-exit reachability
-- :ns[Loops] — execution-loop scenarios on mock SDKs (free, no API key): tool-loop exit, mid-run provider switching, global exit conditions, falsy state merge
+- :ns[Loops] — execution-loop scenarios on mock SDKs (free, no API key): tool-loop exit, mid-run provider switching, global exit conditions, falsy state merge — plus the RFC modern-core round: strict outputs on both wires, streaming, sequential-vs-parallel tools, native-tool passthrough, and :ns[Loops.mcpToolLoop] driving a real stdio MCP server through the middleware chain
 
 ## Live Claude agents
 

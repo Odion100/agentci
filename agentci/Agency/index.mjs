@@ -3,6 +3,7 @@ import ConfigModule from "../ConfigModule/index.mjs";
 function createAgentci() {
   const systemContext = {
     Agents: [],
+    connections: [],
     config: {
       sdk: undefined,
       model: "",
@@ -29,11 +30,22 @@ function createAgentci() {
       ? AgentModule(__constructor, name)
       : __constructor;
   }
+  function chainReturn() {
+    const surface = { ...rootModule };
+    Object.defineProperties(surface, {
+      agent: { value: Agentci.agent },
+      config: { value: Agentci.config },
+      build: { value: Agentci.build },
+      close: { value: Agentci.close },
+    });
+    return surface;
+  }
+
   Agentci.agent = (name, __constructor) => {
     const agentModule = createModule(__constructor, name);
     if (!systemContext.Agents.length) rootModule = agentModule;
     systemContext.Agents.push({ name, module: agentModule });
-    return { ...rootModule, agent: Agentci.agent, config: Agentci.config };
+    return chainReturn();
   };
 
   Agentci.rootAgent = (__constructor) => {
@@ -43,15 +55,29 @@ function createAgentci() {
       name,
       module: rootModule,
     });
-    // console.log("rootModule-->", rootModule);
-    return { ...rootModule, agent: Agentci.agent, config: Agentci.config };
+    return chainReturn();
   };
 
   Agentci.config = (__constructor) => {
     systemContext.config = ConfigModule(__constructor);
-    return rootModule
-      ? { ...rootModule, agent: Agentci.agent, config: Agentci.config }
-      : Agentci;
+    return rootModule ? chainReturn() : Agentci;
+  };
+
+  Agentci.build = () => {
+    if (!rootModule)
+      throw Error(`[Agentci Error]: build() called before any agent was registered.`);
+    const agents = systemContext.Agents.reduce((map, { name, module }) => {
+      map[name] = module;
+      return map;
+    }, {});
+    const surface = { ...rootModule, agents };
+    Object.defineProperty(surface, "close", { value: Agentci.close });
+    return surface;
+  };
+
+  Agentci.close = async () => {
+    await Promise.all(systemContext.connections.map((connection) => connection.close()));
+    systemContext.connections.length = 0;
   };
 
   return Agentci;
