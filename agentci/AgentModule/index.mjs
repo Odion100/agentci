@@ -1,5 +1,5 @@
 import EventEmitter from "events";
-import sdkWrappers from "../utils/sdkWrappers.mjs";
+import sdkWrappers, { parseInput, normalizeMessages } from "../utils/sdkWrappers/index.mjs";
 import agentRequestHandler from "./utils/agentRequestHandler.mjs";
 
 export default function createAgentModule(systemContext) {
@@ -12,7 +12,7 @@ export default function createAgentModule(systemContext) {
 
     const internalContext = {
       agents: [],
-      exitConditions: { iterations: 0, errors: 0, functionCall: [], shortCircuit: 0 },
+      exitConditions: {},
       middleware: {
         before: {},
         after: {},
@@ -29,13 +29,15 @@ export default function createAgentModule(systemContext) {
     };
     const reservedKeys = ["use", "before", "after"];
     Agent.use = (options) => {
-      if (options.exitConditions) {
+      const hasExitConditions = !!options.exitConditions;
+      if (hasExitConditions) {
         if (typeof options.exitConditions.functionCall === "string") {
           options.exitConditions.functionCall = [options.exitConditions.functionCall];
-        } else if (!Array.isArray(options.exitConditions.functionCall)) {
-          options.exitConditions.functionCall = [];
         }
-        if (options.exitConditions.functionCall.includes("$all")) {
+        if (
+          Array.isArray(options.exitConditions.functionCall) &&
+          options.exitConditions.functionCall.includes("$all")
+        ) {
           const i = options.exitConditions.functionCall.indexOf("$all");
           const methods = Object.keys(Agent).filter((key) => !reservedKeys.includes(key));
           options.exitConditions.functionCall.splice(i, 1, ...methods);
@@ -45,7 +47,7 @@ export default function createAgentModule(systemContext) {
         internalContext.exitConditions,
         options.exitConditions
       );
-      checkExitConditions(options.exitConditions, name);
+      if (hasExitConditions) checkExitConditions(options.exitConditions, name);
       Object.assign(internalContext, options);
     };
 
@@ -95,7 +97,7 @@ export default function createAgentModule(systemContext) {
       const initialConfigState = systemContext.config.state || {};
       for (const state of [initialInternalState, initialConfigState]) {
         for (const prop in state) {
-          if (!newState[prop]) newState[prop] = state[prop];
+          if (!(prop in newState)) newState[prop] = state[prop];
         }
       }
       return newState;
@@ -110,23 +112,21 @@ export default function createAgentModule(systemContext) {
           conf.exitConditions,
           internalContext.exitConditions
         );
+        if (!Array.isArray(exitConditions.functionCall)) exitConditions.functionCall = [];
+        checkExitConditions(exitConditions, name);
         const middleware = getMiddleware();
-        // const agentList = [...conf.agents, ...internalContext.agents];
         const agents = systemContext.Agents.reduce((results, { name, module }) => {
-          // if (agentList.includes(name))
           results[name] = module;
           return results;
         }, {});
-        // console.log("agents", agents);
-        // throw agentList;
         context = {
           name,
-          sdk: conf.sdk || internalContext.sdk,
-          model: conf.model || internalContext.model,
-          prompt: conf.prompt || internalContext.prompt,
-          provider: conf.provider || internalContext.provider,
-          temperature: conf.temperature || internalContext.temperature,
-          max_tokens: conf.max_tokens || internalContext.max_tokens,
+          sdk: internalContext.sdk ?? conf.sdk,
+          model: internalContext.model ?? conf.model,
+          prompt: internalContext.prompt ?? conf.prompt,
+          provider: internalContext.provider ?? conf.provider,
+          temperature: internalContext.temperature ?? conf.temperature,
+          max_tokens: internalContext.max_tokens ?? conf.max_tokens,
           schemas: { default: conf.schema, internal: internalContext.schema },
           exitConditions,
           middleware,
@@ -137,10 +137,11 @@ export default function createAgentModule(systemContext) {
           if (!context[prop])
             throw Error(`[Agentci Error]: required agent context ${prop}`);
         }
-        if (!sdkWrappers[provider])
-          throw Error(`[Agentci Error]: ${provider} is not a supported provider.`);
-
-        context.llm = sdkWrappers[provider](sdk);
+        if (typeof provider === "string") {
+          if (!sdkWrappers[provider])
+            throw Error(`[Agentci Error]: ${provider} is not a supported provider.`);
+          context.llm = sdkWrappers[provider](sdk);
+        }
       }
 
       const agent = { ...systemContext.config.Agent, ...Agent };
@@ -150,14 +151,11 @@ export default function createAgentModule(systemContext) {
     }
     function insertMessage(input) {
       const userInput = typeof input === "string" ? { message: input } : input;
-      const parsedInput = context.llm.parseInput(userInput);
-      state.messages.push(parsedInput);
+      state.messages.push(parseInput(userInput));
     }
 
     function getNormalizedMessages(messages = state.messages) {
-      console.log("getNormalizedMessages", messages);
-      if (context) return context.llm.normalizeMessages(messages);
-      else return [];
+      return messages ? normalizeMessages(messages) : [];
     }
     return { invoke, insertMessage, getNormalizedMessages };
   };
@@ -178,7 +176,13 @@ function addMiddleware(name, mwList, middlewareMap) {
   }
 }
 function checkExitConditions(exitConditions, name) {
-  const validExitConditions = ["iterations", "functionCall", "shortCircuit", "state"];
+  const validExitConditions = [
+    "iterations",
+    "errors",
+    "functionCall",
+    "shortCircuit",
+    "state",
+  ];
   let hasValidExitCondition = false;
 
   for (const condition of validExitConditions) {

@@ -18,7 +18,9 @@
   },
   "homepage": "https://github.com/Odion100/agentci#readme",
   "devDependencies": {
-    "cz-conventional-changelog": "^3.3.0"
+    "cz-conventional-changelog": "^3.3.0",
+    "systemlynx": "^3.3.2",
+    "systemview-plugin": "^2.18.0"
   },
   "config": {
     "commitizen": {

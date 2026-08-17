@@ -9,7 +9,7 @@ export default function ConfigModule(constructor) {
 
   const internalContext = {
     agents: [],
-    exitConditions: { iterations: 0, errors: 0, functionCall: [] },
+    exitConditions: {},
     middleware: {
       before: {},
       after: {},
@@ -29,10 +29,11 @@ export default function ConfigModule(constructor) {
     if (options.exitConditions) {
       if (typeof options.exitConditions.functionCall === "string") {
         options.exitConditions.functionCall = [options.exitConditions.functionCall];
-      } else if (!Array.isArray(options.exitConditions.functionCall)) {
-        options.exitConditions.functionCall = [];
       }
-      if (options.exitConditions.functionCall.includes("$all")) {
+      if (
+        Array.isArray(options.exitConditions.functionCall) &&
+        options.exitConditions.functionCall.includes("$all")
+      ) {
         const i = options.exitConditions.functionCall.indexOf("$all");
         const methods = Object.keys(Agent).filter((key) => !reservedKeys.includes(key));
         options.exitConditions.functionCall.splice(i, 1, ...methods);

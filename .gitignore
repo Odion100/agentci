@@ -128,3 +128,12 @@ dist
 .yarn/build-state.yml
 .yarn/install-state.gz
 .pnp.*
+
+# Agent-maintained wiki and Claude Code config (local memory — not for version control)
+wiki/
+.claude/
+
+# SystemView (local hub state — regenerated at service start)
+.systemview/
+systemview.manifest.json
+systemview.logs
