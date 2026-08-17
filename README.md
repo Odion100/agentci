@@ -2,7 +2,7 @@
 
 Agentci (Agent Control Interface) is a Javascript framework for building AI agents using a structured execution model. It provides a consistent interface for working with AI model APIs and organizing function calling, middleware, and execution flow.
 
-Agentci abstracts model-specific implementations (e.g., OpenAI) and allows agents to be composed using functions and middleware.
+Agentci abstracts model-specific implementations (OpenAI and Anthropic/Claude) and allows agents to be composed using functions and middleware. Conversation state is kept in one shared message format, so an agent can even switch providers mid-execution without losing history.
 
 ---
 
@@ -28,15 +28,15 @@ import OpenAI from "openai";
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-const agent = Agentci(function () {
+const agent = Agentci().rootAgent(function MyAgent() {
   this.use({
     provider: "openai",
     model: "gpt-4o",
     sdk: openai,
     prompt: "...",
     schema,
+    exitConditions: { functionCall: "finish", iterations: 5 },
   });
-  ...
   // define functions, middleware, etc.
 });
 
@@ -52,8 +52,43 @@ const result = await agent.invoke("...", state);
 ### Install
 
 ```bash
-npm install agentci openai
+npm install agentci openai            # OpenAI models
+npm install agentci @anthropic-ai/sdk # Claude models
 ```
+
+---
+
+### Providers
+
+The `provider` option selects the wrapper; the `sdk` option is the provider's client instance, injected by you — Agentci has no SDK dependency of its own.
+
+```javascript
+// OpenAI
+this.use({ provider: "openai", sdk: new OpenAI({ apiKey }), model: "gpt-4o", ... });
+
+// Claude — "anthropic" and "claude" are the same wrapper
+this.use({
+  provider: "anthropic",
+  sdk: new Anthropic({ apiKey }),
+  model: "claude-opus-5",
+  max_tokens: 2048, // Anthropic requires max_tokens; defaults to 4096 if unset
+  ...
+});
+```
+
+The same schema, functions, middleware, and exit conditions work on either provider. Internally every conversation is stored in one shared message format; each wrapper converts to its provider's wire format per request. Notes for Claude: tool schemas are converted to Anthropic's `input_schema` form automatically, tool results are batched per turn, and `temperature` should be left unset for the newest Claude models (they reject sampling parameters).
+
+`provider` and `sdk` can also be functions of `({ state, input })` — evaluated every cycle — so an agent can switch providers mid-execution:
+
+```javascript
+this.use({
+  provider: ({ state }) => (state.iterations === 0 ? "openai" : "anthropic"),
+  sdk: ({ state }) => (state.iterations === 0 ? openai : anthropic),
+  ...
+});
+```
+
+`model`, `prompt`, `schema`, `temperature`, and `max_tokens` accept functions the same way.
 
 ---
 
@@ -225,7 +260,9 @@ If `next()` is not called, the function execution will not continue.
 
 Middleware functions receive:
 
-- `args` → the arguments provided by the model for the function call (these are the same values that will be passed into the function if execution continues)
+- `fn` → the name of the function (or hook) being wrapped
+- `args` → the arguments provided by the model for the function call (mutable — changes here are what the function receives)
+- `input` → the original user input passed to `invoke()`
 - `state` → shared state across execution
 - `agents` → a handle on other agents that can be invoked
 - `next` → continues execution to the next step in the pipeline
@@ -275,7 +312,7 @@ Exit conditions are configured inside `this.use()`.
 
 ## Exit Conditions
 
-Exit conditions control when the invocation loop should stop.
+Exit conditions control when the invocation loop should stop. **At least one valid exit condition is required** — validated when `use()` receives `exitConditions`, and again at the first `invoke()` against the merged agent + global config set. An agent whose `functionCall` exit names functions missing from the schema (with no other condition as fallback) fails schema validation rather than looping forever.
 
 ```javascript
 this.use({
@@ -285,6 +322,18 @@ this.use({
   },
 });
 ```
+
+### iterations
+
+Stops execution after the specified number of model calls — the hard ceiling most agents should set.
+
+```javascript
+exitConditions: {
+  iterations: 5,
+}
+```
+
+---
 
 ### errors
 
@@ -346,7 +395,7 @@ This allows custom logic to determine when execution should stop.
 
 ### shortCircuit
 
-Stops execution after a specific number of iterations (model cycles) is reached.
+Stops execution after the specified number of **consecutive model responses without a function call**. `shortCircuit: 1` makes a plain chat agent exit after its first text-only answer; a tool-calling response resets the count.
 
 ```javascript
 exitConditions: {
@@ -436,5 +485,23 @@ export default Agentci()
 ```
 
 This is useful for shared configuration that should apply across the Agentci instance.
+
+Agent-specific settings take precedence over global config: an agent's own `model`, `prompt`, `provider`, `sdk`, `temperature`, or `max_tokens` wins over the same key set in `.config()`, and agent `exitConditions` override config values key by key.
+
+---
+
+## Agent Methods
+
+The object returned by `Agentci().rootAgent(...)` (and by each `.agent()` chain) exposes:
+
+- `invoke(input, state?)` → runs the execution loop; `input` is a string or `{ message, image?, images? }` (image paths are base64-encoded automatically). Returns the final output.
+- `insertMessage(input)` → appends a user message to the conversation without invoking the model — useful for seeding history between invocations.
+- `getNormalizedMessages(messages?)` → returns the conversation in a provider-neutral shape (`{ role, date, message, image?, images?, tool_calls? }`) for display or storage.
+
+---
+
+## Debugging
+
+Set `AGENTCI_DEBUG=1` to log the execution loop's internals (middleware runs, function calls, model responses). Without it the loop is silent; real errors always print via `console.error`.
 
 ---
